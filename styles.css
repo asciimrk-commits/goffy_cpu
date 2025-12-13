@@ -102,6 +102,9 @@ html, body {
     transform: translateX(-100%);
     opacity: 0;
     pointer-events: none;
+    width: 0;
+    min-width: 0;
+    margin-left: calc(-1 * var(--sidebar-width));
 }
 
 .sidebar-toggle {
@@ -565,12 +568,13 @@ html, body {
 .tab-content {
     display: none;
     flex: 1;
-    overflow: hidden;
+    overflow: auto;
 }
 
 .tab-content.active {
     display: flex;
     flex-direction: column;
+    overflow: auto;
 }
 
 /* ===== CANVAS ===== */
@@ -971,6 +975,8 @@ html, body {
     padding: 24px;
     max-width: 900px;
     margin: 0 auto;
+    overflow-y: auto;
+    max-height: calc(100vh - 180px);
 }
 
 .recommend-header {
@@ -1000,8 +1006,9 @@ html, body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
-    min-height: 400px;
-    overflow: auto;
+    min-height: 300px;
+    max-height: calc(100vh - 350px);
+    overflow-y: auto;
 }
 
 .recommend-placeholder {
