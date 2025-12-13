@@ -1,688 +1,749 @@
 /**
- * HFT CPU Mapper - Optimization Rules Engine v4.0
+ * HFT CPU Mapper - Optimization Rules Engine v4.3
  * 
- * BenderServer-specific placement rules based on internal documentation.
- * This module provides offline AI-like recommendations for CPU topology optimization.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * КЛЮЧЕВЫЕ ПРИНЦИПЫ ОПТИМИЗАЦИИ
+ * ═══════════════════════════════════════════════════════════════════════════
  * 
- * === CORE PRINCIPLES ===
- * 1. Minimize cross-NUMA access
- * 2. Maximize L3 cache locality for critical paths
- * 3. Reduce jitter through proper isolation
+ * 1. L3 CACHE AFFINITY (критично для latency):
+ *    - Гейты + Роботы → идеально в одном L3
+ *    - Гейты + IRQ → желательно в одном L3
+ *    - Сервисные ядра (OS, Trash, RF, Click, UDP, AR) → вымывают ОДИН L3 пул
+ *    - НЕ вымывать L3 кэш роботов и гейтов!
  * 
- * === PLACEMENT HIERARCHY ===
- * Network Node (closest to NIC):
- *   - IRQ handlers (mandatory)
- *   - Gateways (SSS+ tier on clean L3)
- *   - Trash (must be on network node)
- *   - UDP (if traffic > 10k pps)
+ * 2. NUMA LOCALITY:
+ *    - Сетевая NUMA: IRQ, Gateways, Trash, UDP
+ *    - Пулы роботов: 1 пул = 1 NUMA нода (минимизация cross-NUMA трафика)
  * 
- * Logic Node (dedicated L3):
- *   - Diamond tier robots
- *   - AR (AllRobots)
- *   - RF (can share with AR or Trash)
- *   - Formula (5-7% needs dedicated, usually on AR)
+ * 3. НАГРУЗКА:
+ *    - Цель: 20-30% avg на ядро
+ *    - Расчёт количества ядер по текущей нагрузке
  * 
- * OS Node (core 0, hyperthreads):
- *   - System processes
- *   - Housekeeping
+ * 4. ИЗОЛЯЦИЯ:
+ *    - OS ядра: НЕ изолированы, на них НИЧЕГО
+ *    - Все остальные роли: ТОЛЬКО на изолированных ядрах
+ * 
+ * 5. СОВМЕЩЕНИЕ:
+ *    - Trash + RF + ClickHouse → можно на 1 ядро
+ *    - AR + Formula → можно на 1 ядро
+ *    - AR + Trash → НЕЛЬЗЯ
+ *    - Gateway/Robot → ТОЛЬКО выделенные ядра
  */
 
 const HFT_RULES = {
-    // Version for compatibility
-    version: '4.0',
+    version: '4.3',
     
-    // === ROLE CATEGORIES ===
     categories: {
-        system: {
-            name: 'System',
-            description: 'OS and housekeeping tasks',
-            roles: ['sys_os'],
-            numaPreference: 'any', // Usually core 0 and its hyperthread
-            l3Preference: 'dirty' // Can share with other non-critical
-        },
-        network: {
-            name: 'Network Stack',
-            description: 'IRQ handlers, UDP processing, Trash',
-            roles: ['net_irq', 'udp', 'trash'],
-            numaPreference: 'network', // Must be on network-attached NUMA
-            l3Preference: 'dirty' // Shared L3 acceptable
-        },
-        gateway: {
-            name: 'Gateways',
-            description: 'Market data gateways - most latency sensitive',
-            roles: ['gateway'],
-            numaPreference: 'network', // Close to NIC
-            l3Preference: 'clean' // Prefer clean L3 for SSS+ tier
-        },
-        logic: {
-            name: 'Trading Logic',
-            description: 'Robots, AR, RF, Formula, ClickHouse',
-            roles: ['robot', 'pool1', 'pool2', 'ar', 'rf', 'formula', 'click'],
-            numaPreference: 'any',
-            l3Preference: 'clean' // Diamond robots need clean L3
-        }
+        system: { name: 'System', roles: ['sys_os'] },
+        network: { name: 'Network Stack', roles: ['net_irq', 'udp', 'trash'] },
+        gateway: { name: 'Gateways', roles: ['gateway'] },
+        logic: { name: 'Trading Logic', roles: ['robot', 'pool1', 'pool2', 'ar', 'rf', 'formula', 'click'] }
     },
     
-    // === ROLE DEFINITIONS ===
     roles: {
         sys_os: {
-            id: 'sys_os',
-            name: 'System (OS)',
-            category: 'system',
-            color: '#5c6b7a',
-            priority: 100,
-            placement: {
-                preferredCores: [0], // Core 0 and hyperthread
-                avoidSharing: [],
-                canShareWith: ['click', 'rf'],
-                minCores: 1,
-                maxCores: 5,
-                loadTarget: 0.2 // Target ~20% utilization
-            },
-            description: 'OS housekeeping. Scale based on load average.'
+            id: 'sys_os', name: 'System (OS)', category: 'system',
+            color: '#5c6b7a', priority: 100,
+            description: 'OS ядра. НЕ изолированы. На них НИЧЕГО не размещается.'
         },
-        
         net_irq: {
-            id: 'net_irq',
-            name: 'IRQ (Network)',
-            category: 'network',
-            color: '#e63946',
-            priority: 95,
-            placement: {
-                numaRequirement: 'network', // MUST be on network NUMA
-                avoidSharing: ['robot', 'gateway'], // Never share with latency-critical
-                canShareWith: ['trash', 'udp'],
-                minCores: 1,
-                maxCores: 4,
-                scalingRule: 'per-queue' // Scale with NIC queues
-            },
-            description: 'Network interrupt handlers. Must be on network NUMA node.'
+            id: 'net_irq', name: 'IRQ (Network)', category: 'network',
+            color: '#e63946', priority: 95,
+            description: 'Изолированные ядра. Желательно в L3 с гейтами.'
         },
-        
         udp: {
-            id: 'udp',
-            name: 'UDP Handler',
-            category: 'network',
-            color: '#f4a261',
-            priority: 70,
-            placement: {
-                numaRequirement: 'network',
-                avoidSharing: ['robot', 'gateway'],
-                canShareWith: ['trash', 'net_irq'],
-                minCores: 0, // Not always needed
-                maxCores: 2,
-                scalingRule: 'traffic' // Dedicated if >10k pps
-            },
-            description: 'UDP processing. Dedicated core if traffic > 10k pps.'
+            id: 'udp', name: 'UDP Handler', category: 'network',
+            color: '#f4a261', priority: 70,
+            description: 'Максимум 1 ядро. Сервисный L3 пул.'
         },
-        
         trash: {
-            id: 'trash',
-            name: 'Trash',
-            category: 'network',
-            color: '#8b6914',
-            priority: 20,
-            placement: {
-                numaRequirement: 'network', // MUST be on network node
-                avoidSharing: ['ar'], // Never on AR core
-                canShareWith: ['rf', 'click', 'udp'],
-                minCores: 1,
-                maxCores: 1
-            },
-            description: 'Background tasks. Must be on network node. Never share with AR.'
+            id: 'trash', name: 'Trash', category: 'network',
+            color: '#8b6914', priority: 20,
+            description: 'Ровно 1 ядро. Сервисный L3 пул. Совмещается с RF, Click.'
         },
-        
         gateway: {
-            id: 'gateway',
-            name: 'Gateway',
-            category: 'gateway',
-            color: '#ffd60a',
-            priority: 90,
-            placement: {
-                numaRequirement: 'network', // Close to NIC
-                l3Requirement: 'clean', // SSS+ tier needs clean L3
-                avoidSharing: ['trash', 'net_irq', 'udp', 'sys_os'],
-                canShareWith: [], // Dedicated cores preferred
-                minCores: 3,
-                maxCores: 16,
-                loadTarget: 0.2 // Target ~20% per core
-            },
-            description: 'Market data gateways. SSS+ tier on clean L3 cache.'
+            id: 'gateway', name: 'Gateway', category: 'gateway',
+            color: '#ffd60a', priority: 90,
+            description: 'Сетевая NUMA. L3 с IRQ и роботами. ВЫДЕЛЕННЫЕ ядра.'
         },
-        
         robot: {
-            id: 'robot',
-            name: 'Robot',
-            category: 'logic',
-            color: '#2ec4b6',
-            priority: 85,
-            placement: {
-                l3Requirement: 'clean', // Diamond tier on clean L3
-                avoidSharing: ['trash', 'net_irq', 'udp'],
-                canShareWith: [], // Dedicated cores
-                minCores: 1,
-                maxCores: 32,
-                loadTarget: 0.2
-            },
-            description: 'Trading robots. Diamond tier needs clean L3 with gateways.'
+            id: 'robot', name: 'Robot', category: 'logic',
+            color: '#2ec4b6', priority: 85,
+            description: 'L3 с гейтами. ВЫДЕЛЕННЫЕ ядра. Цель: 20-30% нагрузки.'
         },
-        
-        pool1: {
-            id: 'pool1',
-            name: 'Robot Pool 1',
-            category: 'logic',
-            color: '#3b82f6',
-            priority: 80,
-            placement: {
-                avoidSharing: ['trash', 'net_irq'],
-                canShareWith: ['pool2'],
-                tier: 'gold'
-            },
-            description: 'Gold/Silver tier robots. Can be on-socket cross-NUMA.'
+        pool1: { 
+            id: 'pool1', name: 'Robot Pool 1', category: 'logic', 
+            color: '#3b82f6', priority: 80,
+            description: '1 пул = 1 NUMA нода целиком'
         },
-        
-        pool2: {
-            id: 'pool2',
-            name: 'Robot Pool 2',
-            category: 'logic',
-            color: '#6366f1',
-            priority: 75,
-            placement: {
-                avoidSharing: ['trash', 'net_irq'],
-                canShareWith: ['pool1'],
-                tier: 'silver'
-            },
-            description: 'Silver tier robots. Cross-socket acceptable.'
+        pool2: { 
+            id: 'pool2', name: 'Robot Pool 2', category: 'logic', 
+            color: '#6366f1', priority: 75,
+            description: '1 пул = 1 NUMA нода целиком'
         },
-        
         ar: {
-            id: 'ar',
-            name: 'AllRobots',
-            category: 'logic',
-            color: '#a855f7',
-            priority: 60,
-            placement: {
-                avoidSharing: ['trash'], // NEVER with Trash
-                canShareWith: ['rf', 'formula'],
-                minCores: 1,
-                maxCores: 2
-            },
-            description: 'AllRobots thread. Can share with RF and Formula. Never with Trash.'
+            id: 'ar', name: 'AllRobots', category: 'logic',
+            color: '#a855f7', priority: 60,
+            description: '1 ядро. Сервисный L3 пул. НЕ совмещать с Trash.'
         },
-        
         rf: {
-            id: 'rf',
-            name: 'RemoteFormula',
-            category: 'logic',
-            color: '#22d3ee',
-            priority: 50,
-            placement: {
-                avoidSharing: [],
-                canShareWith: ['ar', 'trash', 'click'], // Flexible placement
-                minCores: 1,
-                maxCores: 1
-            },
-            description: 'RemoteFormula. Can be on AR, Trash, or ClickHouse core.'
+            id: 'rf', name: 'RemoteFormula', category: 'logic',
+            color: '#22d3ee', priority: 50,
+            description: 'Сервисный L3 пул. Можно с Trash.'
         },
-        
         formula: {
-            id: 'formula',
-            name: 'Formula',
-            category: 'logic',
-            color: '#94a3b8',
-            priority: 30,
-            placement: {
-                avoidSharing: [],
-                canShareWith: ['ar'],
-                dedicatedChance: 0.07 // 5-7% need dedicated core
-            },
-            description: 'Formula calculations. Usually on AR, rarely needs dedicated.'
+            id: 'formula', name: 'Formula', category: 'logic',
+            color: '#94a3b8', priority: 30,
+            description: 'Обычно на AR. Сервисный L3 пул.'
         },
-        
         click: {
-            id: 'click',
-            name: 'ClickHouse',
-            category: 'logic',
-            color: '#4f46e5',
-            priority: 40,
-            placement: {
-                avoidSharing: [],
-                canShareWith: ['rf', 'trash', 'sys_os'], // Not cache-critical
-                minCores: 1,
-                maxCores: 4
-            },
-            description: 'ClickHouse cores. Not latency critical, L3 flush tolerant.'
+            id: 'click', name: 'ClickHouse', category: 'logic',
+            color: '#4f46e5', priority: 40,
+            description: 'Не критично к L3. Можно с Trash.'
         },
-        
         isolated: {
-            id: 'isolated',
-            name: 'Isolated',
-            category: 'state',
-            color: '#ffffff',
-            priority: 1,
-            isStateFlag: true,
-            description: 'Kernel isolation flag (isolcpus). Visual indicator only.'
+            id: 'isolated', name: 'Isolated', category: 'state',
+            color: '#ffffff', priority: 1, isStateFlag: true
         }
     },
     
-    // === OPTIMIZATION RULES ===
+    // =========================================================================
+    // VALIDATION RULES
+    // =========================================================================
     rules: [
         {
-            id: 'network-numa-irq',
+            id: 'irq-only-isolated',
             severity: 'error',
             check: (state) => {
                 const issues = [];
-                const netNumas = state.netNumaNodes;
-                
                 Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
-                    if (tags.has('net_irq')) {
-                        const numa = state.coreNumaMap[cpu];
-                        if (!netNumas.has(numa)) {
-                            issues.push({
-                                cpu,
-                                message: `IRQ on CPU ${cpu} is not on network NUMA (is on NUMA ${numa}, network is ${[...netNumas].join(',')})`
-                            });
-                        }
+                    if (tags.has('net_irq') && !state.isolatedCores.has(cpu)) {
+                        issues.push({ message: `IRQ на ядре ${cpu} — ядро НЕ изолировано!` });
                     }
                 });
-                
                 return issues;
-            },
-            fix: 'Move IRQ handlers to cores on the network NUMA node'
+            }
         },
-        
+        {
+            id: 'trash-single',
+            severity: 'error',
+            check: (state) => {
+                const trashCores = [];
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    if (tags.has('trash')) trashCores.push(cpu);
+                });
+                if (trashCores.length > 1) {
+                    return [{ message: `Trash на ${trashCores.length} ядрах (${trashCores.join(', ')}). Должен быть РОВНО 1!` }];
+                }
+                return [];
+            }
+        },
         {
             id: 'trash-network-numa',
             severity: 'error',
             check: (state) => {
                 const issues = [];
                 const netNumas = state.netNumaNodes;
-                
                 Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
                     if (tags.has('trash')) {
                         const numa = state.coreNumaMap[cpu];
                         if (netNumas.size > 0 && !netNumas.has(numa)) {
-                            issues.push({
-                                cpu,
-                                message: `Trash on CPU ${cpu} must be on network NUMA node`
-                            });
+                            issues.push({ message: `Trash на ядре ${cpu} (NUMA ${numa}) — должен быть на сетевой NUMA!` });
                         }
                     }
                 });
-                
                 return issues;
-            },
-            fix: 'Move Trash to a core on the network NUMA node'
+            }
         },
-        
         {
             id: 'ar-trash-conflict',
             severity: 'error',
             check: (state) => {
                 const issues = [];
-                
                 Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
                     if (tags.has('ar') && tags.has('trash')) {
-                        issues.push({
-                            cpu,
-                            message: `CPU ${cpu} has both AR and Trash - these cannot share a core`
-                        });
+                        issues.push({ message: `Ядро ${cpu}: AR + Trash вместе НЕДОПУСТИМО!` });
                     }
                 });
-                
                 return issues;
-            },
-            fix: 'Separate AR and Trash onto different cores'
+            }
         },
-        
         {
-            id: 'gateway-l3-isolation',
-            severity: 'warning',
-            check: (state) => {
-                const issues = [];
-                const gatewayCores = new Set();
-                const noisyCores = new Set();
-                
-                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
-                    if (tags.has('gateway')) gatewayCores.add(cpu);
-                    if (tags.has('trash') || tags.has('net_irq') || tags.has('udp') || tags.has('sys_os')) {
-                        noisyCores.add(cpu);
-                    }
-                });
-                
-                // Check if gateways share L3 with noisy cores
-                const l3Groups = state.l3Groups || {};
-                Object.entries(l3Groups).forEach(([l3Id, cores]) => {
-                    const hasGateway = cores.some(c => gatewayCores.has(c));
-                    const hasNoisy = cores.some(c => noisyCores.has(c) && !gatewayCores.has(c));
-                    
-                    if (hasGateway && hasNoisy) {
-                        issues.push({
-                            l3: l3Id,
-                            message: `L3 cache ${l3Id} has both Gateways and noisy tasks (IRQ/UDP/Trash/OS)`
-                        });
-                    }
-                });
-                
-                return issues;
-            },
-            fix: 'Move SSS+ tier Gateways to a clean L3 cache region'
-        },
-        
-        {
-            id: 'robot-gateway-l3-sharing',
-            severity: 'info',
-            check: (state) => {
-                const issues = [];
-                const gatewayCores = new Set();
-                const robotCores = new Set();
-                
-                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
-                    if (tags.has('gateway')) gatewayCores.add(cpu);
-                    if (tags.has('robot')) robotCores.add(cpu);
-                });
-                
-                // Check if Diamond robots share L3 with gateways (good!)
-                const l3Groups = state.l3Groups || {};
-                let sharedL3Count = 0;
-                
-                Object.entries(l3Groups).forEach(([l3Id, cores]) => {
-                    const hasGateway = cores.some(c => gatewayCores.has(c));
-                    const hasRobot = cores.some(c => robotCores.has(c));
-                    if (hasGateway && hasRobot) sharedL3Count++;
-                });
-                
-                if (gatewayCores.size > 0 && robotCores.size > 0 && sharedL3Count === 0) {
-                    issues.push({
-                        message: 'Diamond tier Robots should share L3 cache with Gateways for best latency'
-                    });
-                }
-                
-                return issues;
-            },
-            fix: 'Consider placing Diamond tier robots on the same L3 as Gateways'
-        },
-        
-        {
-            id: 'os-sizing',
-            severity: 'warning',
-            check: (state) => {
-                const issues = [];
-                const osCores = [];
-                
-                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
-                    if (tags.has('sys_os')) {
-                        osCores.push(cpu);
-                    }
-                });
-                
-                // Calculate expected OS cores based on total
-                const totalCores = Object.keys(state.coreNumaMap).length;
-                const recommended = totalCores > 100 ? 5 : (totalCores > 50 ? 3 : 1);
-                
-                if (osCores.length < recommended) {
-                    issues.push({
-                        current: osCores.length,
-                        recommended,
-                        message: `Only ${osCores.length} OS cores for ${totalCores} total cores. Recommended: ${recommended}`
-                    });
-                }
-                
-                return issues;
-            },
-            fix: 'Add more cores to OS allocation based on system load'
-        },
-        
-        {
-            id: 'cross-numa-critical',
-            severity: 'warning',
+            id: 'gateway-network-numa',
+            severity: 'error',
             check: (state) => {
                 const issues = [];
                 const netNumas = state.netNumaNodes;
-                
-                ['gateway'].forEach(role => {
-                    Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
-                        if (tags.has(role)) {
-                            const numa = state.coreNumaMap[cpu];
-                            // Check if it's far from network (different socket)
-                            if (netNumas.size > 0 && !netNumas.has(numa)) {
-                                // This is a cross-NUMA placement
-                                issues.push({
-                                    cpu,
-                                    role,
-                                    message: `${role} on CPU ${cpu} (NUMA ${numa}) is cross-NUMA from network (${[...netNumas].join(',')})`
-                                });
-                            }
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    if (tags.has('gateway')) {
+                        const numa = state.coreNumaMap[cpu];
+                        if (netNumas.size > 0 && !netNumas.has(numa)) {
+                            issues.push({ message: `Gateway на ядре ${cpu} (NUMA ${numa}) — ДОЛЖЕН быть на сетевой NUMA!` });
                         }
-                    });
+                    }
+                });
+                return issues;
+            }
+        },
+        {
+            id: 'gateway-dedicated',
+            severity: 'error',
+            check: (state) => {
+                const issues = [];
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    if (tags.has('gateway')) {
+                        const otherRoles = [...tags].filter(t => t !== 'gateway' && t !== 'isolated');
+                        if (otherRoles.length > 0) {
+                            issues.push({ message: `Gateway ядро ${cpu} совмещено с ${otherRoles.join(', ')} — НЕДОПУСТИМО!` });
+                        }
+                    }
+                });
+                return issues;
+            }
+        },
+        {
+            id: 'robot-dedicated',
+            severity: 'error',
+            check: (state) => {
+                const issues = [];
+                const robotRoles = ['robot', 'pool1', 'pool2'];
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    const hasRobot = robotRoles.some(r => tags.has(r));
+                    if (hasRobot) {
+                        const otherRoles = [...tags].filter(t => !robotRoles.includes(t) && t !== 'isolated');
+                        if (otherRoles.length > 0) {
+                            issues.push({ message: `Robot ядро ${cpu} совмещено с ${otherRoles.join(', ')} — НЕДОПУСТИМО!` });
+                        }
+                    }
+                });
+                return issues;
+            }
+        },
+        {
+            id: 'udp-single',
+            severity: 'warning',
+            check: (state) => {
+                const udpCores = [];
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    if (tags.has('udp')) udpCores.push(cpu);
+                });
+                if (udpCores.length > 1) {
+                    return [{ message: `UDP на ${udpCores.length} ядрах — максимум 1!` }];
+                }
+                return [];
+            }
+        },
+        {
+            id: 'os-nothing',
+            severity: 'error',
+            check: (state) => {
+                const issues = [];
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    if (tags.has('sys_os')) {
+                        const otherRoles = [...tags].filter(t => t !== 'sys_os' && t !== 'isolated');
+                        if (otherRoles.length > 0) {
+                            issues.push({ message: `OS ядро ${cpu} имеет роли: ${otherRoles.join(', ')} — НЕДОПУСТИМО!` });
+                        }
+                    }
+                });
+                return issues;
+            }
+        },
+        {
+            id: 'robots-exist',
+            severity: 'error',
+            check: (state) => {
+                const robotCores = [];
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    if (tags.has('robot') || tags.has('pool1') || tags.has('pool2')) robotCores.push(cpu);
+                });
+                if (Object.keys(state.coreNumaMap).length > 0 && robotCores.length === 0) {
+                    return [{ message: 'НЕТ ядер для Robots — торговля НЕВОЗМОЖНА!' }];
+                }
+                return [];
+            }
+        },
+        {
+            id: 'gateway-irq-l3',
+            severity: 'info',
+            check: (state) => {
+                const irqL3s = new Set();
+                const gatewayL3s = new Set();
+                
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    const l3 = HFT_RULES.getCoreL3(state, cpu);
+                    if (tags.has('net_irq')) irqL3s.add(l3);
+                    if (tags.has('gateway')) gatewayL3s.add(l3);
                 });
                 
+                const shared = [...irqL3s].filter(l3 => gatewayL3s.has(l3));
+                if (irqL3s.size > 0 && gatewayL3s.size > 0 && shared.length === 0) {
+                    return [{ message: 'IRQ и Gateways в разных L3 кэшах — желательно в одном' }];
+                }
+                return [];
+            }
+        },
+        {
+            id: 'gateway-robot-l3',
+            severity: 'info',
+            check: (state) => {
+                const robotL3s = new Set();
+                const gatewayL3s = new Set();
+                
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    const l3 = HFT_RULES.getCoreL3(state, cpu);
+                    if (tags.has('robot') || tags.has('pool1') || tags.has('pool2')) robotL3s.add(l3);
+                    if (tags.has('gateway')) gatewayL3s.add(l3);
+                });
+                
+                const shared = [...robotL3s].filter(l3 => gatewayL3s.has(l3));
+                if (robotL3s.size > 0 && gatewayL3s.size > 0 && shared.length === 0) {
+                    return [{ message: 'Роботы и Gateways в разных L3 кэшах — идеально в одном' }];
+                }
+                return [];
+            }
+        },
+        {
+            id: 'pool-numa-isolation',
+            severity: 'warning',
+            check: (state) => {
+                const issues = [];
+                const pool1Numas = new Set();
+                const pool2Numas = new Set();
+                
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    const numa = state.coreNumaMap[cpu];
+                    if (tags.has('pool1')) pool1Numas.add(numa);
+                    if (tags.has('pool2')) pool2Numas.add(numa);
+                });
+                
+                if (pool1Numas.size > 1) {
+                    issues.push({ message: `Pool 1 на ${pool1Numas.size} NUMA нодах — должен быть на 1` });
+                }
+                if (pool2Numas.size > 1) {
+                    issues.push({ message: `Pool 2 на ${pool2Numas.size} NUMA нодах — должен быть на 1` });
+                }
+                const overlap = [...pool1Numas].filter(n => pool2Numas.has(n));
+                if (overlap.length > 0 && pool1Numas.size > 0 && pool2Numas.size > 0) {
+                    issues.push({ message: `Pool 1 и Pool 2 пересекаются на NUMA ${overlap.join(',')}` });
+                }
                 return issues;
-            },
-            fix: 'Move latency-critical tasks closer to network NUMA'
+            }
+        },
+        {
+            id: 'load-gateway',
+            severity: 'warning',
+            check: (state) => {
+                const issues = [];
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    if (tags.has('gateway')) {
+                        const load = parseFloat(state.cpuLoadMap[cpu] || 0);
+                        if (load > 30) {
+                            issues.push({ message: `Gateway ${cpu}: нагрузка ${load.toFixed(0)}% > 30%` });
+                        }
+                    }
+                });
+                return issues;
+            }
+        },
+        {
+            id: 'load-robot',
+            severity: 'warning',
+            check: (state) => {
+                const issues = [];
+                Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+                    if (tags.has('robot') || tags.has('pool1') || tags.has('pool2')) {
+                        const load = parseFloat(state.cpuLoadMap[cpu] || 0);
+                        if (load > 30) {
+                            issues.push({ message: `Robot ${cpu}: нагрузка ${load.toFixed(0)}% > 30%` });
+                        }
+                    }
+                });
+                return issues;
+            }
         }
     ],
     
-    /**
-     * Generate optimization recommendations for current state
-     */
-    generateRecommendation(state) {
-        const result = {
-            timestamp: new Date().toISOString(),
-            serverName: state.serverName,
-            current: this.analyzeCurrentState(state),
-            issues: this.runValidation(state),
-            recommendations: [],
-            proposedConfig: null,
-            metrics: {
-                estimatedImprovement: null,
-                risks: [],
-                monitoring: []
+    // =========================================================================
+    // UTILITY FUNCTIONS
+    // =========================================================================
+    
+    getCoreL3(state, cpu) {
+        for (const [key, cores] of Object.entries(state.l3Groups || {})) {
+            if (cores.includes(cpu) || cores.includes(cpu.toString())) {
+                return key;
             }
-        };
-        
-        // Generate specific recommendations
-        result.recommendations = this.buildRecommendations(state, result.issues);
-        
-        // Build proposed configuration
-        result.proposedConfig = this.buildProposedConfig(state, result.recommendations);
-        
-        // Estimate improvement and risks
-        result.metrics = this.estimateMetrics(state, result);
-        
-        return result;
+        }
+        return `numa-${state.coreNumaMap[cpu] || '0'}`;
     },
     
-    /**
-     * Analyze current state
-     */
-    analyzeCurrentState(state) {
-        const analysis = {
-            totalCores: Object.keys(state.coreNumaMap).length,
-            numaNodes: new Set(Object.values(state.coreNumaMap)).size,
-            networkNumas: [...state.netNumaNodes],
-            roleDistribution: {},
-            l3Utilization: {},
-            isolatedCores: [...(state.isolatedCores || [])]
-        };
-        
-        // Count roles
-        Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
-            tags.forEach(tag => {
-                analysis.roleDistribution[tag] = (analysis.roleDistribution[tag] || 0) + 1;
-            });
-        });
-        
-        return analysis;
-    },
-    
-    /**
-     * Run all validation rules
-     */
     runValidation(state) {
         const allIssues = [];
-        
         this.rules.forEach(rule => {
             const issues = rule.check(state);
             issues.forEach(issue => {
                 allIssues.push({
                     ruleId: rule.id,
                     severity: rule.severity,
-                    ...issue,
-                    fix: rule.fix
+                    message: issue.message
                 });
             });
         });
-        
         return allIssues;
     },
     
-    /**
-     * Build specific recommendations
-     */
-    buildRecommendations(state, issues) {
-        const recs = [];
-        const netNuma = [...state.netNumaNodes][0];
-        const coresByNuma = this.groupCoresByNuma(state);
-        const coresByL3 = state.l3Groups || {};
+    // =========================================================================
+    // RECOMMENDATION ENGINE
+    // =========================================================================
+    generateRecommendation(state) {
+        const totalCores = Object.keys(state.coreNumaMap).length;
+        const netNuma = [...state.netNumaNodes][0] || '0';
+        const isolatedCores = [...state.isolatedCores];
         
-        // 1. Network placement
-        if (netNuma !== undefined) {
-            const netCores = coresByNuma[netNuma] || [];
-            recs.push({
-                id: 'network-placement',
-                title: 'Network Stack Placement',
-                description: `Place all network-dependent tasks on NUMA ${netNuma} (NIC attached)`,
-                cores: netCores.slice(0, 8),
-                roles: ['net_irq', 'udp', 'trash'],
-                rationale: 'Minimizes DMA latency and ensures IRQ handlers are closest to NIC memory'
+        // Анализ топологии
+        const topology = this.analyzeTopology(state);
+        
+        // Текущие роли
+        const currentRoles = {};
+        Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
+            tags.forEach(t => {
+                if (!currentRoles[t]) currentRoles[t] = [];
+                currentRoles[t].push(cpu);
+            });
+        });
+        
+        // Функции нагрузки
+        const getLoad = (cores) => {
+            if (!cores || cores.length === 0) return 0;
+            let total = 0;
+            cores.forEach(cpu => { total += parseFloat(state.cpuLoadMap[cpu] || 0); });
+            return total / cores.length;
+        };
+        
+        const getTotalLoad = (cores) => {
+            if (!cores || cores.length === 0) return 0;
+            let total = 0;
+            cores.forEach(cpu => { total += parseFloat(state.cpuLoadMap[cpu] || 0); });
+            return total;
+        };
+        
+        const calcNeeded = (roleCores, targetLoad = 25) => {
+            const total = getTotalLoad(roleCores);
+            if (total === 0) return roleCores?.length || 1;
+            return Math.max(1, Math.ceil(total / targetLoad));
+        };
+        
+        // =====================================================================
+        // СТРОИМ ОПТИМАЛЬНУЮ КОНФИГУРАЦИЮ
+        // =====================================================================
+        
+        const proposed = { Physical: {} };
+        const recommendations = [];
+        const warnings = [];
+        
+        const assignRole = (cpu, role) => {
+            if (!proposed.Physical[cpu]) proposed.Physical[cpu] = [];
+            if (!proposed.Physical[cpu].includes(role)) {
+                proposed.Physical[cpu].push(role);
+            }
+        };
+        
+        const isAssigned = (cpu) => proposed.Physical[cpu]?.length > 0;
+        
+        // L3 пулы на сетевой NUMA
+        const netNumaCores = topology.byNuma[netNuma] || [];
+        const netL3Pools = topology.byNumaL3[netNuma] || {};
+        const netL3Keys = Object.keys(netL3Pools).sort();
+        
+        // -----------------------------------------------------------------
+        // 1. OS ЯДРА - не изолированные
+        // -----------------------------------------------------------------
+        const osCores = netNumaCores.filter(c => !isolatedCores.includes(c));
+        const osLoad = getLoad(currentRoles['sys_os'] || osCores);
+        let osNeeded = Math.max(2, Math.ceil(osLoad * osCores.length / 25));
+        osNeeded = Math.min(osNeeded, osCores.length);
+        
+        const assignedOsCores = osCores.slice(0, osNeeded);
+        assignedOsCores.forEach(cpu => assignRole(cpu, 'sys_os'));
+        
+        // Определяем "сервисный" L3 (там где OS)
+        let serviceL3 = null;
+        for (const l3Key of netL3Keys) {
+            if (netL3Pools[l3Key].some(c => assignedOsCores.includes(c))) {
+                serviceL3 = l3Key;
+                break;
+            }
+        }
+        if (!serviceL3) serviceL3 = netL3Keys[0];
+        
+        // L3 для гейтов (не сервисный, если возможно)
+        let gatewayL3 = netL3Keys.find(k => k !== serviceL3) || serviceL3;
+        
+        recommendations.push({
+            title: '🖥️ OS / Housekeeping',
+            cores: assignedOsCores,
+            description: `${assignedOsCores.length} ядер для системы`,
+            rationale: `L3: ${serviceL3}. Нагрузка ~${osLoad.toFixed(0)}%. НИЧЕГО больше на этих ядрах.`
+        });
+        
+        // -----------------------------------------------------------------
+        // 2. СЕРВИСНЫЕ ЯДРА (в сервисном L3)
+        // -----------------------------------------------------------------
+        const servicePool = (netL3Pools[serviceL3] || [])
+            .filter(c => isolatedCores.includes(c) && !isAssigned(c))
+            .sort((a, b) => parseInt(a) - parseInt(b));
+        
+        let svcIdx = 0;
+        
+        // Trash + RF + Click
+        if (svcIdx < servicePool.length) {
+            const cpu = servicePool[svcIdx++];
+            assignRole(cpu, 'trash');
+            assignRole(cpu, 'rf');
+            assignRole(cpu, 'click');
+            recommendations.push({
+                title: '🗑️ Trash + RF + ClickHouse',
+                cores: [cpu],
+                description: `Ядро ${cpu} — фоновые задачи`,
+                rationale: `Сервисный L3 (${serviceL3}). Не вымывает кэш критичных задач.`
             });
         }
         
-        // 2. Gateway placement
-        const cleanL3 = this.findCleanL3(state, coresByL3);
-        if (cleanL3.length > 0) {
-            recs.push({
-                id: 'gateway-placement',
-                title: 'Gateway L3 Isolation',
-                description: 'Dedicate clean L3 cache region for SSS+ tier Gateways',
-                cores: cleanL3,
-                roles: ['gateway'],
-                rationale: 'Prevents L3 cache pollution from background tasks'
+        // UDP (если есть)
+        if ((currentRoles['udp']?.length || 0) > 0 && svcIdx < servicePool.length) {
+            const cpu = servicePool[svcIdx++];
+            assignRole(cpu, 'udp');
+            recommendations.push({
+                title: '📡 UDP Handler',
+                cores: [cpu],
+                description: `Ядро ${cpu} — UDP`,
+                rationale: 'Максимум 1 ядро. Сервисный L3.'
             });
         }
         
-        // 3. Robot placement
-        recs.push({
-            id: 'robot-placement',
-            title: 'Diamond Tier Robots',
-            description: 'Place Diamond tier robots on same L3 as Gateways when possible',
-            cores: cleanL3.length > 4 ? cleanL3.slice(-2) : [],
-            roles: ['robot'],
-            rationale: 'Shared L3 between gateways and robots reduces inter-process latency'
-        });
-        
-        // 4. AR/RF/Trash separation
-        recs.push({
-            id: 'ar-rf-separation',
-            title: 'AR and Trash Separation',
-            description: 'Ensure AR and Trash are on different cores',
-            roles: ['ar', 'rf', 'trash'],
-            rationale: 'AR handles aggregated robot state - Trash interference causes jitter'
-        });
-        
-        return recs;
-    },
-    
-    /**
-     * Group cores by NUMA node
-     */
-    groupCoresByNuma(state) {
-        const groups = {};
-        Object.entries(state.coreNumaMap).forEach(([cpu, numa]) => {
-            if (!groups[numa]) groups[numa] = [];
-            groups[numa].push(cpu);
-        });
-        // Sort cores numerically within each group
-        Object.keys(groups).forEach(numa => {
-            groups[numa].sort((a, b) => parseInt(a) - parseInt(b));
-        });
-        return groups;
-    },
-    
-    /**
-     * Find L3 cache groups without noisy tasks
-     */
-    findCleanL3(state, l3Groups) {
-        const noisyTasks = ['trash', 'net_irq', 'udp', 'sys_os'];
-        const cleanCores = [];
-        
-        Object.entries(l3Groups).forEach(([l3Id, cores]) => {
-            const hasNoisy = cores.some(cpu => {
-                const tags = state.instances?.Physical?.[cpu];
-                return tags && noisyTasks.some(t => tags.has(t));
+        // AR + Formula
+        if (svcIdx < servicePool.length) {
+            const cpu = servicePool[svcIdx++];
+            assignRole(cpu, 'ar');
+            assignRole(cpu, 'formula');
+            recommendations.push({
+                title: '🔄 AllRobots + Formula',
+                cores: [cpu],
+                description: `Ядро ${cpu}`,
+                rationale: 'НЕ на Trash! Сервисный L3.'
             });
+        }
+        
+        // -----------------------------------------------------------------
+        // 3. IRQ (желательно в L3 гейтов)
+        // -----------------------------------------------------------------
+        const gatewayPool = (netL3Pools[gatewayL3] || [])
+            .filter(c => isolatedCores.includes(c) && !isAssigned(c))
+            .sort((a, b) => parseInt(a) - parseInt(b));
+        
+        const irqCores = [];
+        for (let i = 0; i < 2 && i < gatewayPool.length; i++) {
+            const cpu = gatewayPool[i];
+            assignRole(cpu, 'net_irq');
+            irqCores.push(cpu);
+        }
+        
+        if (irqCores.length > 0) {
+            recommendations.push({
+                title: '⚡ Network IRQ',
+                cores: irqCores,
+                description: `Ядра ${irqCores.join(', ')}`,
+                rationale: `✓ В L3 с гейтами (${gatewayL3})`
+            });
+        }
+        
+        // -----------------------------------------------------------------
+        // 4. GATEWAYS
+        // -----------------------------------------------------------------
+        const neededGateways = calcNeeded(currentRoles['gateway']);
+        const gwLoad = getLoad(currentRoles['gateway']);
+        const gatewayCores = [];
+        
+        const availGw = gatewayPool.filter(c => !isAssigned(c));
+        for (let i = 0; i < neededGateways && i < availGw.length; i++) {
+            assignRole(availGw[i], 'gateway');
+            gatewayCores.push(availGw[i]);
+        }
+        
+        // Если не хватило — берём из других L3 на сетевой NUMA
+        if (gatewayCores.length < neededGateways) {
+            const otherNet = netNumaCores
+                .filter(c => isolatedCores.includes(c) && !isAssigned(c));
+            for (let i = 0; gatewayCores.length < neededGateways && i < otherNet.length; i++) {
+                assignRole(otherNet[i], 'gateway');
+                gatewayCores.push(otherNet[i]);
+            }
+        }
+        
+        recommendations.push({
+            title: '🚪 Gateways',
+            cores: gatewayCores,
+            description: `${gatewayCores.length} ядер: ${gatewayCores.join(', ')}`,
+            rationale: `Нагрузка ~${gwLoad.toFixed(0)}%. L3: ${gatewayL3}`,
+            warning: gatewayCores.length < neededGateways ? `Нужно ${neededGateways}!` : null
+        });
+        
+        // -----------------------------------------------------------------
+        // 5. ROBOTS
+        // -----------------------------------------------------------------
+        const robotLoad = getLoad(currentRoles['robot'] || currentRoles['pool1'] || currentRoles['pool2']);
+        const robotCores = [];
+        const pool1Cores = [];
+        const pool2Cores = [];
+        
+        // Сначала — роботы в L3 с гейтами (идеально!)
+        const robotsInGwL3 = gatewayPool.filter(c => !isAssigned(c));
+        robotsInGwL3.forEach(cpu => {
+            assignRole(cpu, 'robot');
+            robotCores.push(cpu);
+        });
+        
+        // Другие NUMA ноды — пулы
+        const otherNumas = Object.keys(topology.byNuma)
+            .filter(n => n !== netNuma)
+            .sort((a, b) => parseInt(a) - parseInt(b));
+        
+        if (otherNumas.length >= 2) {
+            (topology.byNuma[otherNumas[0]] || [])
+                .filter(c => isolatedCores.includes(c) && !isAssigned(c))
+                .forEach(cpu => { assignRole(cpu, 'pool1'); pool1Cores.push(cpu); });
             
-            if (!hasNoisy) {
-                cleanCores.push(...cores);
-            }
-        });
+            (topology.byNuma[otherNumas[1]] || [])
+                .filter(c => isolatedCores.includes(c) && !isAssigned(c))
+                .forEach(cpu => { assignRole(cpu, 'pool2'); pool2Cores.push(cpu); });
+        } else if (otherNumas.length === 1) {
+            (topology.byNuma[otherNumas[0]] || [])
+                .filter(c => isolatedCores.includes(c) && !isAssigned(c))
+                .forEach(cpu => { assignRole(cpu, 'robot'); robotCores.push(cpu); });
+        }
         
-        return cleanCores.sort((a, b) => parseInt(a) - parseInt(b));
-    },
-    
-    /**
-     * Build proposed configuration
-     */
-    buildProposedConfig(state, recommendations) {
-        // Clone current state
-        const proposed = {
-            instances: { Physical: {} }
-        };
+        if (robotCores.length > 0) {
+            recommendations.push({
+                title: '🤖 Robots (L3 с гейтами)',
+                cores: robotCores,
+                description: `${robotCores.length} ядер в общем L3`,
+                rationale: '✓ Идеально! Минимальный cache miss.'
+            });
+        }
         
-        // Apply recommendations
+        if (pool1Cores.length > 0) {
+            recommendations.push({
+                title: '🤖 Robot Pool 1',
+                cores: pool1Cores,
+                description: `NUMA ${otherNumas[0]}: ${pool1Cores.length} ядер`,
+                rationale: '1 пул = 1 NUMA. Нет cross-NUMA.'
+            });
+        }
+        
+        if (pool2Cores.length > 0) {
+            recommendations.push({
+                title: '🤖 Robot Pool 2',
+                cores: pool2Cores,
+                description: `NUMA ${otherNumas[1]}: ${pool2Cores.length} ядер`,
+                rationale: 'Изолирован от Pool 1.'
+            });
+        }
+        
+        const allRobots = [...robotCores, ...pool1Cores, ...pool2Cores];
+        if (allRobots.length === 0) {
+            warnings.push('КРИТИЧНО: Нет ядер для роботов!');
+        }
+        
+        // =====================================================================
+        // HTML
+        // =====================================================================
+        let html = '<div class="recommend-result">';
+        
+        html += `<div class="recommend-section">
+            <h3>📊 Топология</h3>
+            <div class="recommend-card">
+                <p><strong>Ядер:</strong> ${totalCores} | <strong>Изолировано:</strong> ${isolatedCores.length}</p>
+                <p><strong>Сетевая NUMA:</strong> ${netNuma} | <strong>L3:</strong> ${netL3Keys.join(', ')}</p>
+                <p><strong>Сервисный L3:</strong> ${serviceL3} | <strong>L3 гейтов:</strong> ${gatewayL3}</p>
+            </div>
+        </div>`;
+        
+        if (warnings.length > 0) {
+            html += '<div class="recommend-section"><h3>⚠️ Критично</h3>';
+            warnings.forEach(w => html += `<div class="recommend-card warning"><p>${w}</p></div>`);
+            html += '</div>';
+        }
+        
+        html += '<div class="recommend-section"><h3>📋 Конфигурация</h3>';
         recommendations.forEach(rec => {
-            if (rec.cores && rec.roles) {
-                rec.cores.forEach((cpu, idx) => {
-                    const role = rec.roles[idx % rec.roles.length];
-                    if (!proposed.instances.Physical[cpu]) {
-                        proposed.instances.Physical[cpu] = new Set();
-                    }
-                    proposed.instances.Physical[cpu].add(role);
-                });
-            }
+            html += `<div class="recommend-card ${rec.warning ? 'warning' : ''}">
+                <h4>${rec.title}</h4>
+                <p>${rec.description}</p>
+                <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">${rec.rationale}</p>
+                ${rec.warning ? `<p style="color:#ef4444;">⚠ ${rec.warning}</p>` : ''}
+                ${rec.cores?.length ? `<div class="recommend-cores">
+                    ${rec.cores.map(c => {
+                        const r = (proposed.Physical[c] || [])[0];
+                        const col = this.roles[r]?.color || '#555';
+                        return `<div class="recommend-core" style="background:${col};color:#fff;">${c}</div>`;
+                    }).join('')}
+                </div>` : ''}
+            </div>`;
+        });
+        html += '</div>';
+        
+        html += `<div class="recommend-section">
+            <h3>📈 Итого</h3>
+            <div class="recommend-card ${allRobots.length === 0 ? 'warning' : 'success'}">
+                <p><strong>Гейтов:</strong> ${gatewayCores.length} | <strong>Роботов:</strong> ${allRobots.length}</p>
+                <p><strong>Использовано:</strong> ${Object.keys(proposed.Physical).length} из ${totalCores}</p>
+            </div>
+        </div>`;
+        
+        html += `<div class="recommend-section">
+            <h3>💾 L3 Distribution</h3>
+            <div class="recommend-card"><table style="width:100%;font-size:11px;">
+                <tr style="border-bottom:1px solid var(--border-subtle);">
+                    <th style="text-align:left;padding:4px;">L3</th>
+                    <th style="text-align:left;padding:4px;">Роли</th>
+                </tr>`;
+        
+        const l3Sum = {};
+        Object.entries(proposed.Physical).forEach(([cpu, roles]) => {
+            const l3 = this.getCoreL3(state, cpu);
+            if (!l3Sum[l3]) l3Sum[l3] = new Set();
+            roles.forEach(r => l3Sum[l3].add(r));
         });
         
-        return proposed;
+        Object.entries(l3Sum).forEach(([l3, roles]) => {
+            const roleNames = [...roles].map(r => this.roles[r]?.name || r).join(', ');
+            html += `<tr><td style="padding:4px;">${l3}</td><td style="padding:4px;">${roleNames}</td></tr>`;
+        });
+        
+        html += '</table></div></div></div>';
+        
+        return { html, proposedConfig: { instances: proposed }, recommendations, warnings };
     },
     
-    /**
-     * Estimate performance metrics
-     */
-    estimateMetrics(state, result) {
-        const errorCount = result.issues.filter(i => i.severity === 'error').length;
-        const warnCount = result.issues.filter(i => i.severity === 'warning').length;
+    analyzeTopology(state) {
+        const result = { byNuma: {}, byL3: {}, byNumaL3: {} };
         
-        return {
-            estimatedImprovement: errorCount > 0 ? '20-40%' : (warnCount > 0 ? '5-15%' : '< 5%'),
-            confidenceLevel: errorCount === 0 && warnCount === 0 ? 'High' : 'Medium',
-            risks: [
-                'Configuration change requires trading halt',
-                'Initial stabilization period of 24-48 hours',
-                'Monitor for unexpected latency spikes'
-            ],
-            monitoring: [
-                'Watch P99 latency for 1-2 weeks after change',
-                'Compare gateway throughput before/after',
-                'Check for CPU soft lockups in dmesg',
-                'Validate isolcpus kernel parameter'
-            ],
-            rollback: 'Keep old config JSON for immediate rollback if issues arise'
-        };
+        Object.entries(state.coreNumaMap).forEach(([cpu, numa]) => {
+            if (!result.byNuma[numa]) result.byNuma[numa] = [];
+            result.byNuma[numa].push(cpu);
+        });
+        
+        Object.entries(state.l3Groups || {}).forEach(([l3Key, cores]) => {
+            result.byL3[l3Key] = cores;
+            const numa = state.coreNumaMap[cores[0]];
+            if (!result.byNumaL3[numa]) result.byNumaL3[numa] = {};
+            result.byNumaL3[numa][l3Key] = cores;
+        });
+        
+        Object.values(result.byNuma).forEach(c => c.sort((a, b) => parseInt(a) - parseInt(b)));
+        
+        return result;
     }
 };
 
-// Export for use in main app
-if (typeof window !== 'undefined') {
-    window.HFT_RULES = HFT_RULES;
-}
+if (typeof window !== 'undefined') window.HFT_RULES = HFT_RULES;
