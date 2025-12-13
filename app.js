@@ -727,59 +727,65 @@ const HFT = {
         if (side === 'old') this.compareOld = null;
         else this.compareNew = null;
         document.getElementById(`compare-${side}`).innerHTML = `
-            <div class="drop-zone" onclick="HFT.loadCompareFile('${side}')">
-                <div class="drop-icon">📁</div>
-                <p>Drop JSON</p>
+            <div class="compare-empty" onclick="HFT.loadCompareFile('${side}')">
+                <span>Drop JSON or click</span>
             </div>`;
+        document.getElementById(`compare-server-${side}`).textContent = '—';
         ['added', 'removed', 'changed'].forEach(k => document.getElementById(`diff-${k}`).textContent = '0');
     },
     
     renderComparePanel(side, config) {
         const container = document.getElementById(`compare-${side}`);
+        const serverLabel = document.getElementById(`compare-server-${side}`);
         const geom = config.geometry || {};
         const netNumas = new Set(config.netNumaNodes || []);
+        const isolatedCores = new Set(config.isolatedCores || []);
         const insts = config.instances || {};
         
-        let html = `<div style="margin-bottom:10px;font-size:11px;color:var(--text-muted);">
-            Server: <strong>${config.serverName || '?'}</strong>
-        </div>
-        <div class="blueprint cores-small" style="transform:scale(0.8);transform-origin:top left;">`;
+        // Update server name
+        if (serverLabel) serverLabel.textContent = config.serverName || 'Unknown';
         
-        Object.keys(geom).sort((a, b) => a - b).forEach(socketId => {
-            html += `<div class="socket" data-socket="${socketId}" style="padding:10px;">
-                <div class="socket-label" style="font-size:9px;">S${socketId}</div>
-                <div class="socket-content">`;
+        let html = '<div class="compare-blueprint">';
+        
+        Object.keys(geom).sort((a, b) => parseInt(a) - parseInt(b)).forEach(socketId => {
+            html += `<div class="compare-socket">
+                <div class="compare-socket-label">Socket ${socketId}</div>`;
             
-            Object.keys(geom[socketId]).sort((a, b) => a - b).forEach(numaId => {
+            Object.keys(geom[socketId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
                 const isNet = netNumas.has(numaId);
-                html += `<div class="numa ${isNet ? 'is-network' : ''}" style="padding:6px;min-width:auto;">
-                    <div class="numa-label" style="font-size:8px;">N${numaId}</div>`;
+                html += `<div class="compare-numa ${isNet ? 'is-network' : ''}">
+                    <div class="compare-numa-label">NUMA ${numaId}${isNet ? ' • NET' : ''}</div>
+                    <div class="compare-cores">`;
                 
                 Object.keys(geom[socketId][numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
-                    html += '<div class="cores-grid" style="margin-top:6px;">';
                     geom[socketId][numaId][l3Id].forEach(cpu => {
                         const tags = [];
                         Object.keys(insts).forEach(inst => {
                             if (insts[inst][cpu]) tags.push(...insts[inst][cpu]);
                         });
                         const fillTags = tags.filter(t => t !== 'isolated');
-                        let bg = 'var(--bg-tertiary)', border = 'var(--border-subtle)';
+                        const isIsolated = isolatedCores.has(cpu) || tags.includes('isolated');
+                        
+                        let bg = 'var(--bg-primary)';
+                        let hasRole = false;
                         if (fillTags.length > 0) {
                             const role = HFT_RULES.roles[fillTags[0]];
-                            if (role) { bg = role.color; border = role.color; }
+                            if (role) { bg = role.color; hasRole = true; }
                         }
-                        html += `<div class="core compare-core" data-cpu="${cpu}" data-side="${side}"
-                            style="background:${bg};border-color:${border};${fillTags.length > 0 ? 'color:#fff;' : ''}"
+                        
+                        html += `<div class="compare-core ${hasRole ? 'has-role' : ''} ${isIsolated ? 'isolated' : ''}" 
+                            data-cpu="${cpu}" data-side="${side}"
+                            style="background:${bg};"
                             onmouseenter="HFT.showCompareTooltip(event,'${side}','${cpu}')"
                             onmousemove="HFT.moveTooltip(event)"
                             onmouseleave="HFT.hideTooltip()">${cpu}</div>`;
                     });
-                    html += '</div>';
                 });
-                html += '</div>';
+                html += '</div></div>';
             });
-            html += '</div></div>';
+            html += '</div>';
         });
+        
         html += '</div>';
         container.innerHTML = html;
     },
