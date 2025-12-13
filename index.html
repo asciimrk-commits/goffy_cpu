@@ -11,73 +11,74 @@
 <body>
 
 <div class="app">
-    <!-- Sidebar Toggle -->
-    <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar (Hotkey: [)">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M15 18l-6-6 6-6"/>
-        </svg>
-    </button>
-
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo">
-                <span class="logo-icon">◈</span>
-                <span class="logo-text">CPU<span class="accent">MAP</span></span>
-            </div>
-            <span class="version">v4.0</span>
-        </div>
-
-        <div class="sidebar-content">
-            <!-- Input Section -->
-            <section class="panel">
-                <h3 class="panel-title">
-                    <span class="panel-icon">⬡</span>
-                    Data Input
-                </h3>
-                <textarea id="inputData" class="input-area" placeholder="Paste cpu-map.sh output here..."></textarea>
-                <div class="btn-group">
-                    <button class="btn btn-primary" onclick="HFT.render()">
-                        <span>Build Map</span>
-                    </button>
-                    <button class="btn btn-ghost" onclick="HFT.loadDemo()">Demo</button>
+        <!-- Toggle button inside sidebar -->
+        <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar (Hotkey: [)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M15 18l-6-6 6-6"/>
+            </svg>
+        </button>
+        
+        <div class="sidebar-inner">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">◈</span>
+                    <span class="logo-text">CPU<span class="accent">MAP</span></span>
                 </div>
-            </section>
+                <span class="version">v4.5</span>
+            </div>
 
-            <!-- Paint Tools -->
-            <section class="panel">
-                <h3 class="panel-title">
-                    <span class="panel-icon">◐</span>
-                    Paint Tools
-                </h3>
-                <div class="palette" id="palette"></div>
-                <p class="hint">Click to paint • Ctrl+Click to erase</p>
-            </section>
+            <div class="sidebar-content">
+                <!-- Input Section -->
+                <section class="panel">
+                    <h3 class="panel-title">
+                        <span class="panel-icon">⬡</span>
+                        Data Input
+                    </h3>
+                    <textarea id="inputData" class="input-area" placeholder="Paste cpu-map.sh output here..."></textarea>
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="HFT.render()">
+                            <span>Build Map</span>
+                        </button>
+                        <button class="btn btn-ghost" onclick="HFT.loadDemo()">Demo</button>
+                    </div>
+                </section>
 
-            <!-- Config Output -->
-            <section class="panel">
-                <h3 class="panel-title">
-                    <span class="panel-icon">⬢</span>
-                    Config Output
-                </h3>
-                <button class="btn btn-secondary btn-block" onclick="HFT.copyConfig()">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2"/>
-                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                    </svg>
-                    Copy Config
-                </button>
-                <div class="output-box" id="output">Waiting for data...</div>
-            </section>
+                <!-- Paint Tools -->
+                <section class="panel">
+                    <h3 class="panel-title">
+                        <span class="panel-icon">◐</span>
+                        Paint Tools
+                    </h3>
+                    <div class="palette" id="palette"></div>
+                    <p class="hint">Click to paint • Ctrl+Click to erase</p>
+                </section>
 
-            <!-- OS Sizing Calculator -->
-            <section class="panel">
-                <h3 class="panel-title">
-                    <span class="panel-icon">⊡</span>
-                    OS Sizing
-                </h3>
-                <div class="sizing-grid">
-                    <div class="sizing-item">
+                <!-- Config Output -->
+                <section class="panel">
+                    <h3 class="panel-title">
+                        <span class="panel-icon">⬢</span>
+                        Config Output
+                    </h3>
+                    <button class="btn btn-secondary btn-block" onclick="HFT.copyConfig()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                        </svg>
+                        Copy Config
+                    </button>
+                    <div class="output-box" id="output">Waiting for data...</div>
+                </section>
+
+                <!-- OS Sizing Calculator -->
+                <section class="panel">
+                    <h3 class="panel-title">
+                        <span class="panel-icon">⊡</span>
+                        OS Sizing
+                    </h3>
+                    <div class="sizing-grid">
+                        <div class="sizing-item">
                         <span class="sizing-label">OS Cores</span>
                         <span class="sizing-value" id="calc-cores">—</span>
                     </div>
@@ -126,6 +127,7 @@
                     <span class="muted">Click to validate configuration</span>
                 </div>
             </section>
+            </div>
         </div>
     </aside>
 
@@ -155,8 +157,8 @@
         </nav>
 
         <!-- Header Stats -->
-        <header class="header" id="header">
-            <div class="header-info">
+        <header class="content-header" id="header">
+            <div class="header-left">
                 <h1 class="header-title">HFT <span class="accent">CPU MAPPER</span></h1>
                 <p class="header-subtitle" id="header-subtitle">Ready for input</p>
             </div>
@@ -173,7 +175,11 @@
                     <span class="stat-value" id="stat-free">—</span>
                     <span class="stat-label">Free</span>
                 </div>
-                <div class="stat highlight">
+                <div class="stat">
+                    <span class="stat-value" id="stat-sockets">—</span>
+                    <span class="stat-label">Sockets</span>
+                </div>
+                <div class="stat">
                     <span class="stat-value" id="stat-net">—</span>
                     <span class="stat-label">Net NUMA</span>
                 </div>
@@ -186,10 +192,12 @@
 
         <!-- Tab: Mapper -->
         <div class="tab-content active" id="tab-mapper">
-            <div class="canvas" id="canvas">
-                <div class="canvas-empty">
-                    <div class="empty-icon">◈</div>
-                    <p>Paste <code>cpu-map.sh</code> output and click <strong>Build Map</strong></p>
+            <div class="canvas-wrapper">
+                <div class="canvas" id="canvas">
+                    <div class="canvas-empty">
+                        <div class="empty-icon">◈</div>
+                        <p>Paste <code>cpu-map.sh</code> output and click <strong>Build Map</strong></p>
+                    </div>
                 </div>
             </div>
         </div>
