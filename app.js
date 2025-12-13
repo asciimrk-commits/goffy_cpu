@@ -1,18 +1,18 @@
 /**
- * HFT CPU Mapper - Main Application v4.2
- * Fixed: BENDER parsing, adaptive UI, scroll, role assignment
+ * HFT CPU Mapper - Main Application v4.5
+ * Fixed: BENDER parsing (IRQ, OS cores), socket detection, UI responsiveness
  */
 
 const HFT = {
     state: {
         serverName: '',
-        geometry: {},
-        coreNumaMap: {},
-        l3Groups: {},
+        geometry: {},       // socket -> numa -> l3 -> [cores]
+        coreNumaMap: {},    // cpu -> numa
+        l3Groups: {},       // l3Key -> [cores]
         netNumaNodes: new Set(),
         isolatedCores: new Set(),
-        coreIRQMap: {},
-        cpuLoadMap: {},
+        coreIRQMap: {},     // cpu -> [irq numbers]
+        cpuLoadMap: {},     // cpu -> load%
         instances: { Physical: {} },
         networkInterfaces: []
     },
@@ -29,7 +29,7 @@ const HFT = {
         this.initDragDrop();
         this.initKeyboard();
         this.initSidebar();
-        this.activeTool = HFT_RULES.roles.robot;
+        this.activeTool = HFT_RULES.roles.robot_default;
     },
     
     initPalette() {
@@ -111,7 +111,7 @@ const HFT = {
     },
     
     // =========================================================================
-    // PARSING - Fixed BENDER role extraction
+    // PARSING - v4.5 Fixed BENDER parsing
     // =========================================================================
     parse(text) {
         this.state = {
@@ -122,12 +122,11 @@ const HFT = {
         
         const lines = text.split('\n');
         let mode = 'none';
-        let currentIface = null;
         
         // Role mapping from BENDER keys
         const ROLE_MAP = {
             'GatewaysDefault': 'gateway',
-            'RobotsDefault': 'robot',
+            'RobotsDefault': 'robot_default',
             'RobotsNode1': 'pool1',
             'RobotsNode2': 'pool2',
             'AllRobotsThCPU': 'ar',
@@ -138,6 +137,10 @@ const HFT = {
             'UdpSendCores': 'udp',
             'Formula': 'formula'
         };
+        
+        // Временные структуры для парсинга BENDER
+        const benderCpuInfo = {}; // cpu -> { isolated, net_cpu, roles: [] }
+        const benderNetCpus = new Set(); // IRQ ядра из BENDER_NET (только короткие записи)
         
         for (let line of lines) {
             line = line.trim();
@@ -150,17 +153,6 @@ const HFT = {
                 continue;
             }
             if (line.startsWith('HOST:')) { this.state.serverName = line.split(':')[1]; continue; }
-            
-            // Old format detection
-            const serverMatch = line.match(/Подключение к\s+([^\s=]+)/);
-            if (serverMatch) this.state.serverName = serverMatch[1].replace('.qb.loc', '').replace('===', '').trim();
-            
-            if (line.includes('>>> 1. LSCPU')) { mode = 'lscpu'; continue; }
-            if (line.includes('>>> 2. NUMA')) { mode = 'numa'; continue; }
-            if (line.includes('>>> 3. ISOLATED')) { mode = 'isolated'; continue; }
-            if (line.includes('>>> 4. NETWORK')) { mode = 'network'; continue; }
-            if (line.includes('>>> 5. RUNTIME')) { mode = 'runtime'; continue; }
-            if (line.includes('>>> 7. CPU LOAD')) { mode = 'cpuload'; continue; }
             
             // LSCPU parsing
             if (mode === 'lscpu') {
@@ -182,23 +174,29 @@ const HFT = {
                 this.state.l3Groups[l3Key].push(cpu);
             }
             
-            // NUMA fallback
+            // NUMA fallback - строим топологию если LSCPU пустой
             if (mode === 'numa') {
                 const numaMatch = line.match(/node\s+(\d+)\s+cpus?:\s*([\d\s,\-]+)/i);
                 if (numaMatch) {
                     const node = numaMatch[1];
                     const cpuList = numaMatch[2].replace(/\s+/g, ',');
+                    
                     this.parseRange(cpuList).forEach(cpu => {
                         const cpuStr = cpu.toString();
                         if (!this.state.coreNumaMap[cpuStr]) {
                             this.state.coreNumaMap[cpuStr] = node;
-                            const socket = '0', l3id = node;
+                            
+                            // Определяем socket по номеру NUMA (2 NUMA на сокет обычно)
+                            const socket = Math.floor(parseInt(node) / 2).toString();
+                            const l3id = node; // L3 = NUMA в fallback режиме
+                            
                             if (!this.state.geometry[socket]) this.state.geometry[socket] = {};
                             if (!this.state.geometry[socket][node]) this.state.geometry[socket][node] = {};
                             if (!this.state.geometry[socket][node][l3id]) this.state.geometry[socket][node][l3id] = [];
                             if (!this.state.geometry[socket][node][l3id].includes(cpuStr)) {
                                 this.state.geometry[socket][node][l3id].push(cpuStr);
                             }
+                            
                             const l3Key = `${socket}-${node}-${l3id}`;
                             if (!this.state.l3Groups[l3Key]) this.state.l3Groups[l3Key] = [];
                             if (!this.state.l3Groups[l3Key].includes(cpuStr)) {
@@ -214,86 +212,66 @@ const HFT = {
                 this.parseRange(line).forEach(c => this.state.isolatedCores.add(c.toString()));
             }
             
-            // NETWORK
+            // NETWORK (from script)
             if (mode === 'network') {
                 if (line.startsWith('IF:')) {
                     const parts = {};
                     line.split('|').forEach(p => { const [k, v] = p.split(':'); parts[k] = v; });
                     if (parts.NUMA && parts.NUMA !== '-1') this.state.netNumaNodes.add(parts.NUMA);
-                    if (parts.IRQ) {
-                        parts.IRQ.split(',').forEach(irqStr => {
-                            if (!irqStr) return;
-                            const [irq, cpus] = irqStr.split(':');
-                            this.parseRange(cpus || '').forEach(cpu => {
-                                const cStr = cpu.toString();
-                                this.addTag('Physical', cStr, 'net_irq');
-                                if (!this.state.coreIRQMap[cStr]) this.state.coreIRQMap[cStr] = [];
-                                this.state.coreIRQMap[cStr].push(irq);
-                            });
-                        });
-                    }
                 }
             }
             
-            // BENDER - Fixed parsing for role extraction
+            // BENDER - Parse cpu_id lines
             if (mode === 'bender' || mode === 'runtime') {
-                // Parse lines like: {cpu_id:6,isolated:True,GatewaysDefault:[TRA0]}
-                const cpuIdMatch = line.match(/cpu_id[:\s]*(\d+)/);
+                const cpuIdMatch = line.match(/\{?\s*cpu_id[:\s]*(\d+)/);
                 if (cpuIdMatch) {
                     const cpu = cpuIdMatch[1];
+                    if (!benderCpuInfo[cpu]) benderCpuInfo[cpu] = { isolated: false, net_cpu: false, roles: [] };
                     
-                    // Check isolated
+                    // Проверяем isolated
                     if (/isolated[:\s]*True/i.test(line)) {
+                        benderCpuInfo[cpu].isolated = true;
                         this.state.isolatedCores.add(cpu);
                     }
                     
-                    // Check net_cpu
+                    // Проверяем net_cpu (это IRQ ядра!)
                     if (/net_cpu[:\s]*\[/i.test(line)) {
-                        this.addTag('Physical', cpu, 'net_irq');
-                        const n = this.state.coreNumaMap[cpu];
-                        if (n) this.state.netNumaNodes.add(n);
+                        benderCpuInfo[cpu].net_cpu = true;
                     }
                     
-                    // Extract roles from this line
+                    // Извлекаем роли
                     Object.entries(ROLE_MAP).forEach(([key, role]) => {
                         const pattern = new RegExp(key + '[:\\s]*\\[', 'i');
                         if (pattern.test(line)) {
-                            this.addTag('Physical', cpu, role);
+                            benderCpuInfo[cpu].roles.push(role);
                         }
                     });
-                }
-                
-                // Also parse summary lines like: GatewaysDefault:[6,7,8,9,10,11,12,13,14,15]
-                Object.entries(ROLE_MAP).forEach(([key, role]) => {
-                    const pattern = new RegExp(key + '[:\\s]*\\[([\\d,\\s]+)\\]', 'i');
-                    const match = line.match(pattern);
-                    if (match) {
-                        this.parseRange(match[1]).forEach(cpu => {
-                            this.addTag('Physical', cpu.toString(), role);
-                        });
-                    }
-                });
-                
-                // System cpus
-                if (/System\s*cpus?[:\s]*/i.test(line)) {
-                    const sysMatch = line.match(/System\s*cpus?[:\s]*([\d,\s\-]+)/i);
-                    if (sysMatch) {
-                        this.parseRange(sysMatch[1]).forEach(c => this.addTag('Physical', c.toString(), 'sys_os'));
+                    
+                    // Пустое ядро (только cpu_id, без ролей и без isolated) = OS
+                    const hasContent = /isolated|net_cpu|Gateways|Robots|AllRobots|Remote|Click|Trash|Udp|Formula/i.test(line);
+                    if (!hasContent) {
+                        benderCpuInfo[cpu].isOS = true;
                     }
                 }
             }
             
-            // BENDER_NET - network NUMA detection
+            // BENDER_NET - ТОЛЬКО короткие записи это IRQ ядра
             if (mode === 'bender_net') {
-                const netMatch = line.match(/^(net\d+|eth\d+)[:\s]*([\d,\s\-]+)/);
+                // net0: 2,4 - это IRQ ядра (короткий список)
+                // net0: 0-31 - это ВСЕ ядра на сетевой NUMA, игнорируем
+                const netMatch = line.match(/^(net\d+|eth\d+)[:\s]*([\d,\s\-]+)$/);
                 if (netMatch) {
                     const cpus = this.parseRange(netMatch[2]);
-                    if (cpus.length > 0) {
-                        const firstCpu = cpus[0].toString();
-                        const numa = this.state.coreNumaMap[firstCpu];
-                        if (numa) this.state.netNumaNodes.add(numa);
+                    // Если это короткий список (< 8 ядер), то это IRQ
+                    // Если длинный (вся NUMA нода), то игнорируем
+                    if (cpus.length <= 8) {
+                        cpus.forEach(c => benderNetCpus.add(c.toString()));
+                        // Определяем сетевую NUMA
+                        if (cpus.length > 0) {
+                            const numa = this.state.coreNumaMap[cpus[0].toString()];
+                            if (numa) this.state.netNumaNodes.add(numa);
+                        }
                     }
-                    cpus.forEach(c => this.addTag('Physical', c.toString(), 'net_irq'));
                 }
             }
             
@@ -306,12 +284,28 @@ const HFT = {
             }
         }
         
-        // Mark core 0 as OS if nothing else assigned
-        if (Object.keys(this.state.coreNumaMap).length > 0) {
-            if (!this.state.instances.Physical['0'] || this.state.instances.Physical['0'].size === 0) {
-                this.addTag('Physical', '0', 'sys_os');
+        // =====================================================================
+        // POST-PROCESSING: Применяем собранную информацию из BENDER
+        // =====================================================================
+        
+        Object.entries(benderCpuInfo).forEach(([cpu, info]) => {
+            // IRQ ядра: net_cpu:True ИЛИ в списке BENDER_NET
+            if (info.net_cpu || benderNetCpus.has(cpu)) {
+                this.addTag('Physical', cpu, 'net_irq');
+                const numa = this.state.coreNumaMap[cpu];
+                if (numa) this.state.netNumaNodes.add(numa);
             }
-        }
+            
+            // OS ядра: пустые (без isolated, без ролей)
+            if (info.isOS && !info.isolated && info.roles.length === 0) {
+                this.addTag('Physical', cpu, 'sys_os');
+            }
+            
+            // Применяем роли
+            info.roles.forEach(role => {
+                this.addTag('Physical', cpu, role);
+            });
+        });
         
         return this.state.geometry;
     },
@@ -609,7 +603,7 @@ const HFT = {
     
     exportConfig() {
         const config = {
-            version: '4.2',
+            version: '4.5',
             serverName: this.state.serverName,
             timestamp: new Date().toISOString(),
             geometry: this.state.geometry,
@@ -695,8 +689,8 @@ const HFT = {
         }
         
         output.innerHTML = issues.map(i => {
-            const cls = i.severity === 'error' ? 'val-error' : 'val-warn';
-            const icon = i.severity === 'error' ? '✗' : '⚠';
+            const cls = i.severity === 'error' ? 'val-error' : (i.severity === 'warning' ? 'val-warn' : 'val-info');
+            const icon = i.severity === 'error' ? '✗' : (i.severity === 'warning' ? '⚠' : 'ℹ');
             return `<div class="${cls}">${icon} ${i.message}</div>`;
         }).join('');
     },
@@ -940,6 +934,7 @@ IF:net0|NUMA:0|DRV:ena|IRQ:
 {cpu_id:31}
 @@BENDER_NET@@
 net0: 2,4
+net0: 0-31
 @@LOAD@@
 0:25.0
 1:24.0
