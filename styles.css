@@ -50,7 +50,7 @@ html, body {
     display: flex;
     flex-direction: column;
     transition: width var(--transition), min-width var(--transition);
-    overflow: hidden;
+    overflow: visible;
     position: relative;
     flex-shrink: 0;
 }
@@ -64,6 +64,7 @@ html, body {
 .sidebar.collapsed .sidebar-inner {
     opacity: 0;
     visibility: hidden;
+    pointer-events: none;
 }
 
 .sidebar-inner {
@@ -72,15 +73,17 @@ html, body {
     height: 100%;
     width: var(--sidebar-width);
     transition: opacity var(--transition);
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
-/* Toggle button - attached to sidebar edge */
+/* Toggle button - ALWAYS visible at fixed position from sidebar edge */
 .sidebar-toggle {
     position: absolute;
-    right: -12px;
+    right: -24px;
     top: 50%;
     transform: translateY(-50%);
-    z-index: 200;
+    z-index: 300;
     width: 24px;
     height: 48px;
     background: var(--bg-tertiary);
@@ -92,12 +95,10 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--transition);
+    transition: background var(--transition), color var(--transition);
 }
 
-.sidebar.collapsed .sidebar-toggle {
-    right: -24px;
-}
+/* No change in position when collapsed - stays at right edge */
 
 .sidebar-toggle:hover {
     background: var(--bg-elevated);
@@ -203,6 +204,14 @@ html, body {
     font-family: inherit;
     font-size: 12px;
     text-align: center;
+    -moz-appearance: textfield;
+}
+
+/* Hide number input spinners */
+.input-small::-webkit-outer-spin-button,
+.input-small::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 .btn {
@@ -654,15 +663,33 @@ html, body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 20px;
     overflow: hidden;
 }
 
-.optimize-header { text-align: center; margin-bottom: 20px; }
+.optimize-header {
+    padding: 20px;
+    text-align: center;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-secondary);
+}
+
 .optimize-title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
 .optimize-subtitle { color: var(--text-muted); font-size: 12px; }
 
-.optimize-content { flex: 1; overflow: auto; }
+.optimize-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px 20px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.optimize-content {
+    flex: 1;
+    overflow: auto;
+    padding: 20px;
+}
 
 .recommend-placeholder {
     display: flex;
@@ -705,15 +732,6 @@ html, body {
     font-size: 9px;
     font-weight: 500;
     border-radius: 4px;
-}
-
-.optimize-actions {
-    display: flex;
-    justify-content: center;
-    gap: 12px;
-    margin-top: 20px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border-subtle);
 }
 
 /* ===== VALIDATION ===== */
