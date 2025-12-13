@@ -204,56 +204,47 @@
 
         <!-- Tab: Compare -->
         <div class="tab-content" id="tab-compare">
-            <div class="compare-wrapper">
-                <!-- Stats bar -->
-                <div class="compare-stats-bar">
-                    <div class="compare-stat">
-                        <span class="compare-stat-value added" id="diff-added">0</span>
-                        <span class="compare-stat-label">Added</span>
-                    </div>
-                    <div class="compare-stat">
-                        <span class="compare-stat-value removed" id="diff-removed">0</span>
-                        <span class="compare-stat-label">Removed</span>
-                    </div>
-                    <div class="compare-stat">
-                        <span class="compare-stat-value changed" id="diff-changed">0</span>
-                        <span class="compare-stat-label">Changed</span>
-                    </div>
-                </div>
-                
-                <!-- Side by side panels -->
-                <div class="compare-grid">
-                    <!-- OLD CONFIG -->
-                    <div class="compare-panel">
-                        <div class="compare-panel-header">
-                            <div class="compare-panel-title">
-                                <span class="compare-badge old">OLD</span>
-                                <span class="compare-server" id="compare-server-old">—</span>
-                            </div>
+            <!-- Stats bar -->
+            <div class="cmp-stats">
+                <div class="cmp-stat"><span class="cmp-stat-val cmp-added" id="diff-added">0</span><span class="cmp-stat-lbl">Added</span></div>
+                <div class="cmp-stat"><span class="cmp-stat-val cmp-removed" id="diff-removed">0</span><span class="cmp-stat-lbl">Removed</span></div>
+                <div class="cmp-stat"><span class="cmp-stat-val cmp-changed" id="diff-changed">0</span><span class="cmp-stat-lbl">Changed</span></div>
+            </div>
+            
+            <!-- Side by side grid -->
+            <div class="cmp-grid">
+                <!-- LEFT: OLD -->
+                <div class="cmp-side">
+                    <div class="cmp-header">
+                        <div class="cmp-badge cmp-old">OLD</div>
+                        <span class="cmp-server" id="cmp-server-old">No config loaded</span>
+                        <div class="cmp-actions">
                             <button class="btn btn-sm" onclick="HFT.loadCompareFile('old')">Load</button>
                             <button class="btn btn-sm" onclick="HFT.clearCompare('old')">Clear</button>
                         </div>
-                        <div class="compare-panel-body" id="compare-old">
-                            <div class="compare-empty" onclick="HFT.loadCompareFile('old')">
-                                <span>Drop JSON or click</span>
-                            </div>
+                    </div>
+                    <div class="cmp-body" id="compare-old">
+                        <div class="cmp-empty" onclick="HFT.loadCompareFile('old')">
+                            <div class="cmp-empty-icon">◈</div>
+                            <div>Drop JSON or click to load</div>
                         </div>
                     </div>
-                    
-                    <!-- NEW CONFIG -->
-                    <div class="compare-panel">
-                        <div class="compare-panel-header">
-                            <div class="compare-panel-title">
-                                <span class="compare-badge new">NEW</span>
-                                <span class="compare-server" id="compare-server-new">—</span>
-                            </div>
+                </div>
+                
+                <!-- RIGHT: NEW -->
+                <div class="cmp-side">
+                    <div class="cmp-header">
+                        <div class="cmp-badge cmp-new">NEW</div>
+                        <span class="cmp-server" id="cmp-server-new">No config loaded</span>
+                        <div class="cmp-actions">
                             <button class="btn btn-sm" onclick="HFT.loadCompareFile('new')">Load</button>
                             <button class="btn btn-sm" onclick="HFT.clearCompare('new')">Clear</button>
                         </div>
-                        <div class="compare-panel-body" id="compare-new">
-                            <div class="compare-empty" onclick="HFT.loadCompareFile('new')">
-                                <span>Drop JSON or click</span>
-                            </div>
+                    </div>
+                    <div class="cmp-body" id="compare-new">
+                        <div class="cmp-empty" onclick="HFT.loadCompareFile('new')">
+                            <div class="cmp-empty-icon">◈</div>
+                            <div>Drop JSON or click to load</div>
                         </div>
                     </div>
                 </div>
