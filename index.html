@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HFT CPU Mapper v4.0</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app">
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar (Hotkey: [)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 18l-6-6 6-6"/>
+        </svg>
+    </button>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-icon">◈</span>
+                <span class="logo-text">CPU<span class="accent">MAP</span></span>
+            </div>
+            <span class="version">v4.0</span>
+        </div>
+
+        <div class="sidebar-content">
+            <!-- Input Section -->
+            <section class="panel">
+                <h3 class="panel-title">
+                    <span class="panel-icon">⬡</span>
+                    Data Input
+                </h3>
+                <textarea id="inputData" class="input-area" placeholder="Paste cpu-map.sh output here..."></textarea>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="HFT.render()">
+                        <span>Build Map</span>
+                    </button>
+                    <button class="btn btn-ghost" onclick="HFT.loadDemo()">Demo</button>
+                </div>
+            </section>
+
+            <!-- Paint Tools -->
+            <section class="panel">
+                <h3 class="panel-title">
+                    <span class="panel-icon">◐</span>
+                    Paint Tools
+                </h3>
+                <div class="palette" id="palette"></div>
+                <p class="hint">Click to paint • Ctrl+Click to erase</p>
+            </section>
+
+            <!-- Config Output -->
+            <section class="panel">
+                <h3 class="panel-title">
+                    <span class="panel-icon">⬢</span>
+                    Config Output
+                </h3>
+                <button class="btn btn-secondary btn-block" onclick="HFT.copyConfig()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2"/>
+                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                    </svg>
+                    Copy Config
+                </button>
+                <div class="output-box" id="output">Waiting for data...</div>
+            </section>
+
+            <!-- OS Sizing Calculator -->
+            <section class="panel">
+                <h3 class="panel-title">
+                    <span class="panel-icon">⊡</span>
+                    OS Sizing
+                </h3>
+                <div class="sizing-grid">
+                    <div class="sizing-item">
+                        <span class="sizing-label">OS Cores</span>
+                        <span class="sizing-value" id="calc-cores">—</span>
+                    </div>
+                    <div class="sizing-item">
+                        <span class="sizing-label">Avg Load</span>
+                        <span class="sizing-value" id="calc-load">—</span>
+                    </div>
+                </div>
+                <div class="sizing-row">
+                    <span>Target Load:</span>
+                    <input type="number" id="calc-target" value="3" min="1" max="20" class="input-small">
+                    <span class="sizing-result" id="calc-result">—</span>
+                </div>
+            </section>
+
+            <!-- Import/Export -->
+            <section class="panel">
+                <h3 class="panel-title">
+                    <span class="panel-icon">↔</span>
+                    Import / Export
+                </h3>
+                <div class="btn-group vertical">
+                    <button class="btn btn-secondary" onclick="HFT.exportConfig()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                        </svg>
+                        Export JSON
+                    </button>
+                    <button class="btn btn-secondary" onclick="HFT.importConfig()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                        </svg>
+                        Import JSON
+                    </button>
+                </div>
+            </section>
+
+            <!-- Validation -->
+            <section class="panel">
+                <h3 class="panel-title">
+                    <span class="panel-icon">✓</span>
+                    Validation
+                </h3>
+                <button class="btn btn-secondary btn-block" onclick="HFT.validate()">Run Validation</button>
+                <div class="validation-box" id="validation-output">
+                    <span class="muted">Click to validate configuration</span>
+                </div>
+            </section>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+        <!-- Tabs -->
+        <nav class="tabs">
+            <button class="tab active" data-tab="mapper">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                    <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                </svg>
+                CPU Mapper
+            </button>
+            <button class="tab" data-tab="compare">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 20V10M12 20V4M6 20v-6"/>
+                </svg>
+                Compare
+            </button>
+            <button class="tab" data-tab="recommend">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                </svg>
+                Auto-Optimize
+            </button>
+        </nav>
+
+        <!-- Header Stats -->
+        <header class="header" id="header">
+            <div class="header-info">
+                <h1 class="header-title">HFT <span class="accent">CPU MAPPER</span></h1>
+                <p class="header-subtitle" id="header-subtitle">Ready for input</p>
+            </div>
+            <div class="header-stats" id="header-stats">
+                <div class="stat">
+                    <span class="stat-value" id="stat-total">—</span>
+                    <span class="stat-label">Total</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="stat-used">—</span>
+                    <span class="stat-label">Used</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="stat-free">—</span>
+                    <span class="stat-label">Free</span>
+                </div>
+                <div class="stat highlight">
+                    <span class="stat-value" id="stat-net">—</span>
+                    <span class="stat-label">Net NUMA</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="stat-load">—</span>
+                    <span class="stat-label">Avg Load</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Tab: Mapper -->
+        <div class="tab-content active" id="tab-mapper">
+            <div class="canvas" id="canvas">
+                <div class="canvas-empty">
+                    <div class="empty-icon">◈</div>
+                    <p>Paste <code>cpu-map.sh</code> output and click <strong>Build Map</strong></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Compare -->
+        <div class="tab-content" id="tab-compare">
+            <div class="compare-container">
+                <div class="compare-panel" data-side="old">
+                    <div class="compare-header">
+                        <h3>Previous Config</h3>
+                        <button class="btn btn-ghost btn-sm" onclick="HFT.clearCompare('old')">Clear</button>
+                    </div>
+                    <div class="compare-body" id="compare-old">
+                        <div class="drop-zone" onclick="HFT.loadCompareFile('old')">
+                            <div class="drop-icon">📁</div>
+                            <p>Drop JSON or click to load</p>
+                            <span class="drop-hint">Previous configuration</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="compare-diff" id="compare-diff">
+                    <div class="diff-summary">
+                        <div class="diff-item added">
+                            <span class="diff-count" id="diff-added">0</span>
+                            <span class="diff-label">Added</span>
+                        </div>
+                        <div class="diff-item removed">
+                            <span class="diff-count" id="diff-removed">0</span>
+                            <span class="diff-label">Removed</span>
+                        </div>
+                        <div class="diff-item changed">
+                            <span class="diff-count" id="diff-changed">0</span>
+                            <span class="diff-label">Changed</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="compare-panel" data-side="new">
+                    <div class="compare-header">
+                        <h3>New Config</h3>
+                        <button class="btn btn-ghost btn-sm" onclick="HFT.clearCompare('new')">Clear</button>
+                    </div>
+                    <div class="compare-body" id="compare-new">
+                        <div class="drop-zone" onclick="HFT.loadCompareFile('new')">
+                            <div class="drop-icon">📁</div>
+                            <p>Drop JSON or click to load</p>
+                            <span class="drop-hint">New configuration</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Recommend -->
+        <div class="tab-content" id="tab-recommend">
+            <div class="recommend-container">
+                <div class="recommend-header">
+                    <h2>Auto-Optimization Engine</h2>
+                    <p>Analyze current topology and generate optimized configuration based on BenderServer best practices</p>
+                </div>
+
+                <div class="recommend-actions">
+                    <button class="btn btn-primary btn-lg" onclick="HFT.generateRecommendation()" id="btn-recommend">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                        </svg>
+                        Generate Optimization
+                    </button>
+                    <button class="btn btn-secondary" onclick="HFT.applyRecommendation()" id="btn-apply" disabled>
+                        Apply to Map
+                    </button>
+                </div>
+
+                <div class="recommend-output" id="recommend-output">
+                    <div class="recommend-placeholder">
+                        <p>Load server data first, then click <strong>Generate Optimization</strong></p>
+                        <ul class="recommend-features">
+                            <li>NUMA-aware core placement</li>
+                            <li>L3 cache isolation for critical paths</li>
+                            <li>Network stack optimization</li>
+                            <li>Trash/AR/RF placement rules</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip"></div>
+
+<!-- Scripts -->
+<script src="hft-rules.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
