@@ -99,12 +99,11 @@ html, body {
 }
 
 .sidebar.collapsed {
-    transform: translateX(-100%);
-    opacity: 0;
-    pointer-events: none;
     width: 0;
     min-width: 0;
-    margin-left: calc(-1 * var(--sidebar-width));
+    padding: 0;
+    overflow: hidden;
+    border-right: none;
 }
 
 .sidebar-toggle {
@@ -124,11 +123,10 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--transition-fast);
+    transition: left var(--transition-normal), background var(--transition-fast);
 }
 
-.sidebar.collapsed ~ .sidebar-toggle,
-.sidebar.collapsed + .main .sidebar-toggle {
+.sidebar.collapsed ~ .sidebar-toggle {
     left: 0;
 }
 
