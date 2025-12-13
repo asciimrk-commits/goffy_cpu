@@ -204,48 +204,56 @@
 
         <!-- Tab: Compare -->
         <div class="tab-content" id="tab-compare">
-            <div class="compare-container">
-                <div class="compare-panel" data-side="old">
-                    <div class="compare-header">
-                        <h3>Previous Config</h3>
-                        <button class="btn btn-ghost btn-sm" onclick="HFT.clearCompare('old')">Clear</button>
+            <div class="compare-wrapper">
+                <!-- Stats bar -->
+                <div class="compare-stats-bar">
+                    <div class="compare-stat">
+                        <span class="compare-stat-value added" id="diff-added">0</span>
+                        <span class="compare-stat-label">Added</span>
                     </div>
-                    <div class="compare-body" id="compare-old">
-                        <div class="drop-zone" onclick="HFT.loadCompareFile('old')">
-                            <div class="drop-icon">📁</div>
-                            <p>Drop JSON or click to load</p>
-                            <span class="drop-hint">Previous configuration</span>
-                        </div>
+                    <div class="compare-stat">
+                        <span class="compare-stat-value removed" id="diff-removed">0</span>
+                        <span class="compare-stat-label">Removed</span>
                     </div>
-                </div>
-
-                <div class="compare-diff" id="compare-diff">
-                    <div class="diff-summary">
-                        <div class="diff-item added">
-                            <span class="diff-count" id="diff-added">0</span>
-                            <span class="diff-label">Added</span>
-                        </div>
-                        <div class="diff-item removed">
-                            <span class="diff-count" id="diff-removed">0</span>
-                            <span class="diff-label">Removed</span>
-                        </div>
-                        <div class="diff-item changed">
-                            <span class="diff-count" id="diff-changed">0</span>
-                            <span class="diff-label">Changed</span>
-                        </div>
+                    <div class="compare-stat">
+                        <span class="compare-stat-value changed" id="diff-changed">0</span>
+                        <span class="compare-stat-label">Changed</span>
                     </div>
                 </div>
-
-                <div class="compare-panel" data-side="new">
-                    <div class="compare-header">
-                        <h3>New Config</h3>
-                        <button class="btn btn-ghost btn-sm" onclick="HFT.clearCompare('new')">Clear</button>
+                
+                <!-- Side by side panels -->
+                <div class="compare-grid">
+                    <!-- OLD CONFIG -->
+                    <div class="compare-panel">
+                        <div class="compare-panel-header">
+                            <div class="compare-panel-title">
+                                <span class="compare-badge old">OLD</span>
+                                <span class="compare-server" id="compare-server-old">—</span>
+                            </div>
+                            <button class="btn btn-sm" onclick="HFT.loadCompareFile('old')">Load</button>
+                            <button class="btn btn-sm" onclick="HFT.clearCompare('old')">Clear</button>
+                        </div>
+                        <div class="compare-panel-body" id="compare-old">
+                            <div class="compare-empty" onclick="HFT.loadCompareFile('old')">
+                                <span>Drop JSON or click</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="compare-body" id="compare-new">
-                        <div class="drop-zone" onclick="HFT.loadCompareFile('new')">
-                            <div class="drop-icon">📁</div>
-                            <p>Drop JSON or click to load</p>
-                            <span class="drop-hint">New configuration</span>
+                    
+                    <!-- NEW CONFIG -->
+                    <div class="compare-panel">
+                        <div class="compare-panel-header">
+                            <div class="compare-panel-title">
+                                <span class="compare-badge new">NEW</span>
+                                <span class="compare-server" id="compare-server-new">—</span>
+                            </div>
+                            <button class="btn btn-sm" onclick="HFT.loadCompareFile('new')">Load</button>
+                            <button class="btn btn-sm" onclick="HFT.clearCompare('new')">Clear</button>
+                        </div>
+                        <div class="compare-panel-body" id="compare-new">
+                            <div class="compare-empty" onclick="HFT.loadCompareFile('new')">
+                                <span>Drop JSON or click</span>
+                            </div>
                         </div>
                     </div>
                 </div>
