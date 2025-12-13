@@ -254,13 +254,13 @@
 
         <!-- Tab: Recommend -->
         <div class="tab-content" id="tab-recommend">
-            <div class="recommend-container">
-                <div class="recommend-header">
-                    <h2>Auto-Optimization Engine</h2>
-                    <p>Analyze current topology and generate optimized configuration based on BenderServer best practices</p>
+            <div class="optimize-container">
+                <div class="optimize-header">
+                    <h2 class="optimize-title">Auto-Optimization Engine</h2>
+                    <p class="optimize-subtitle">Analyze current topology and generate optimized configuration based on BenderServer best practices</p>
                 </div>
 
-                <div class="recommend-actions">
+                <div class="optimize-actions">
                     <button class="btn btn-primary btn-lg" onclick="HFT.generateRecommendation()" id="btn-recommend">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
@@ -272,15 +272,9 @@
                     </button>
                 </div>
 
-                <div class="recommend-output" id="recommend-output">
+                <div class="optimize-content" id="recommend-output">
                     <div class="recommend-placeholder">
                         <p>Load server data first, then click <strong>Generate Optimization</strong></p>
-                        <ul class="recommend-features">
-                            <li>NUMA-aware core placement</li>
-                            <li>L3 cache isolation for critical paths</li>
-                            <li>Network stack optimization</li>
-                            <li>Trash/AR/RF placement rules</li>
-                        </ul>
                     </div>
                 </div>
             </div>
