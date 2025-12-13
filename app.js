@@ -126,6 +126,34 @@ const HFT = {
                 if (parseInt(cpu) === 0) this.addTag('Physical', cpu, 'sys_os');
             }
             
+            // NUMA fallback - если LSCPU пустой, строим топологию из NUMA
+            if (mode === 'numa') {
+                const numaMatch = line.match(/node\s+(\d+)\s+cpus?:\s*([\d\s,\-]+)/i);
+                if (numaMatch) {
+                    const node = numaMatch[1];
+                    const cpuList = numaMatch[2].replace(/\s+/g, ',');
+                    this.parseRange(cpuList).forEach(cpu => {
+                        const cpuStr = cpu.toString();
+                        // Только если ещё не добавлено из LSCPU
+                        if (!this.state.coreNumaMap[cpuStr]) {
+                            this.state.coreNumaMap[cpuStr] = node;
+                            const socket = '0', l3id = node;
+                            if (!this.state.geometry[socket]) this.state.geometry[socket] = {};
+                            if (!this.state.geometry[socket][node]) this.state.geometry[socket][node] = {};
+                            if (!this.state.geometry[socket][node][l3id]) this.state.geometry[socket][node][l3id] = [];
+                            if (!this.state.geometry[socket][node][l3id].includes(cpuStr)) {
+                                this.state.geometry[socket][node][l3id].push(cpuStr);
+                            }
+                            const l3Key = `${socket}-${node}-${l3id}`;
+                            if (!this.state.l3Groups[l3Key]) this.state.l3Groups[l3Key] = [];
+                            if (!this.state.l3Groups[l3Key].includes(cpuStr)) {
+                                this.state.l3Groups[l3Key].push(cpuStr);
+                            }
+                        }
+                    });
+                }
+            }
+            
             if (mode === 'isolated' && line !== 'none' && line !== 'N/A') {
                 this.parseRange(line).forEach(c => this.state.isolatedCores.add(c.toString()));
             }
