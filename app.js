@@ -726,17 +726,19 @@ const HFT = {
     clearCompare(side) {
         if (side === 'old') this.compareOld = null;
         else this.compareNew = null;
+        
         document.getElementById(`compare-${side}`).innerHTML = `
-            <div class="compare-empty" onclick="HFT.loadCompareFile('${side}')">
-                <span>Drop JSON or click</span>
+            <div class="cmp-empty" onclick="HFT.loadCompareFile('${side}')">
+                <div class="cmp-empty-icon">◈</div>
+                <div>Drop JSON or click to load</div>
             </div>`;
-        document.getElementById(`compare-server-${side}`).textContent = '—';
+        document.getElementById(`cmp-server-${side}`).textContent = 'No config loaded';
         ['added', 'removed', 'changed'].forEach(k => document.getElementById(`diff-${k}`).textContent = '0');
     },
     
     renderComparePanel(side, config) {
         const container = document.getElementById(`compare-${side}`);
-        const serverLabel = document.getElementById(`compare-server-${side}`);
+        const serverLabel = document.getElementById(`cmp-server-${side}`);
         const geom = config.geometry || {};
         const netNumas = new Set(config.netNumaNodes || []);
         const isolatedCores = new Set(config.isolatedCores || []);
@@ -745,17 +747,21 @@ const HFT = {
         // Update server name
         if (serverLabel) serverLabel.textContent = config.serverName || 'Unknown';
         
-        let html = '<div class="compare-blueprint">';
+        let html = '<div class="cmp-blueprint">';
         
         Object.keys(geom).sort((a, b) => parseInt(a) - parseInt(b)).forEach(socketId => {
-            html += `<div class="compare-socket">
-                <div class="compare-socket-label">Socket ${socketId}</div>`;
+            html += `<div class="cmp-socket">
+                <div class="cmp-socket-hdr">Socket ${socketId}</div>
+                <div class="cmp-socket-body">`;
             
             Object.keys(geom[socketId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
                 const isNet = netNumas.has(numaId);
-                html += `<div class="compare-numa ${isNet ? 'is-network' : ''}">
-                    <div class="compare-numa-label">NUMA ${numaId}${isNet ? ' • NET' : ''}</div>
-                    <div class="compare-cores">`;
+                html += `<div class="cmp-numa ${isNet ? 'is-net' : ''}">
+                    <div class="cmp-numa-hdr">
+                        <span>NUMA ${numaId}</span>
+                        ${isNet ? '<span class="net-tag">NET</span>' : ''}
+                    </div>
+                    <div class="cmp-cores">`;
                 
                 Object.keys(geom[socketId][numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
                     geom[socketId][numaId][l3Id].forEach(cpu => {
@@ -766,16 +772,15 @@ const HFT = {
                         const fillTags = tags.filter(t => t !== 'isolated');
                         const isIsolated = isolatedCores.has(cpu) || tags.includes('isolated');
                         
-                        let bg = 'var(--bg-primary)';
+                        let bg = '';
                         let hasRole = false;
                         if (fillTags.length > 0) {
                             const role = HFT_RULES.roles[fillTags[0]];
-                            if (role) { bg = role.color; hasRole = true; }
+                            if (role) { bg = `background:${role.color};`; hasRole = true; }
                         }
                         
-                        html += `<div class="compare-core ${hasRole ? 'has-role' : ''} ${isIsolated ? 'isolated' : ''}" 
-                            data-cpu="${cpu}" data-side="${side}"
-                            style="background:${bg};"
+                        html += `<div class="cmp-core ${hasRole ? 'has-role' : ''} ${isIsolated ? 'is-isolated' : ''}" 
+                            data-cpu="${cpu}" data-side="${side}" style="${bg}"
                             onmouseenter="HFT.showCompareTooltip(event,'${side}','${cpu}')"
                             onmousemove="HFT.moveTooltip(event)"
                             onmouseleave="HFT.hideTooltip()">${cpu}</div>`;
@@ -783,7 +788,7 @@ const HFT = {
                 });
                 html += '</div></div>';
             });
-            html += '</div>';
+            html += '</div></div>';
         });
         
         html += '</div>';
@@ -836,8 +841,8 @@ const HFT = {
         allCpus.forEach(cpu => {
             const oldTags = getTags(this.compareOld, cpu);
             const newTags = getTags(this.compareNew, cpu);
-            const oldEl = document.querySelector(`.compare-core[data-cpu="${cpu}"][data-side="old"]`);
-            const newEl = document.querySelector(`.compare-core[data-cpu="${cpu}"][data-side="new"]`);
+            const oldEl = document.querySelector(`.cmp-core[data-cpu="${cpu}"][data-side="old"]`);
+            const newEl = document.querySelector(`.cmp-core[data-cpu="${cpu}"][data-side="new"]`);
             
             oldEl?.classList.remove('diff-added', 'diff-removed', 'diff-changed');
             newEl?.classList.remove('diff-added', 'diff-removed', 'diff-changed');
