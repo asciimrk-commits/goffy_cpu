@@ -572,75 +572,67 @@ html, body {
 .tooltip-role { display: flex; align-items: center; gap: 6px; }
 .tooltip-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 
-/* ===== COMPARE TAB ===== */
-.compare-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 20px;
-    overflow: hidden;
-}
+/* ===== COMPARE TAB - Modern Adaptive Layout ===== */
 
-/* ===== COMPARE TAB - Professional Side-by-Side ===== */
-.compare-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-}
-
-.compare-stats-bar {
+/* Stats bar at top */
+.cmp-stats {
     display: flex;
     justify-content: center;
-    gap: 40px;
+    align-items: center;
+    gap: 32px;
     padding: 12px 20px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
 }
 
-.compare-stat {
+.cmp-stat {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 8px;
 }
 
-.compare-stat-value {
-    font-size: 18px;
+.cmp-stat-val {
+    font-size: 20px;
     font-weight: 700;
     font-family: 'Space Grotesk', sans-serif;
 }
 
-.compare-stat-value.added { color: var(--success); }
-.compare-stat-value.removed { color: var(--error); }
-.compare-stat-value.changed { color: var(--warning); }
+.cmp-stat-val.cmp-added { color: var(--success); }
+.cmp-stat-val.cmp-removed { color: var(--error); }
+.cmp-stat-val.cmp-changed { color: var(--warning); }
 
-.compare-stat-label {
+.cmp-stat-lbl {
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 1px;
     color: var(--text-muted);
 }
 
-.compare-grid {
+/* Main grid - two equal columns */
+.cmp-grid {
     flex: 1;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1px;
-    background: var(--border-subtle);
-    min-height: 0;
-}
-
-.compare-panel {
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-primary);
     min-height: 0;
     overflow: hidden;
 }
 
-.compare-panel-header {
+/* Each side panel */
+.cmp-side {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--border-subtle);
+}
+
+.cmp-side:last-child {
+    border-right: none;
+}
+
+/* Panel header */
+.cmp-header {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -650,148 +642,205 @@ html, body {
     flex-shrink: 0;
 }
 
-.compare-panel-title {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.compare-badge {
-    font-size: 9px;
+.cmp-badge {
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 1px;
-    padding: 3px 8px;
-    border-radius: 3px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    flex-shrink: 0;
 }
 
-.compare-badge.old {
-    background: var(--error);
+.cmp-badge.cmp-old {
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
     color: #fff;
 }
 
-.compare-badge.new {
-    background: var(--success);
+.cmp-badge.cmp-new {
+    background: linear-gradient(135deg, #16a34a, #15803d);
     color: #fff;
 }
 
-.compare-server {
-    font-size: 12px;
+.cmp-server {
+    flex: 1;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.compare-panel-body {
+.cmp-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* Panel body - scrollable */
+.cmp-body {
     flex: 1;
     overflow: auto;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
+    padding: 16px;
     min-height: 0;
 }
 
-.compare-empty {
-    flex: 1;
+/* Empty state */
+.cmp-empty {
+    height: 100%;
+    min-height: 200px;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 12px;
     border: 2px dashed var(--border-muted);
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 13px;
     cursor: pointer;
     transition: all var(--transition);
-    min-height: 100px;
 }
 
-.compare-empty:hover {
+.cmp-empty:hover {
     border-color: var(--accent);
     color: var(--accent);
-    background: rgba(0,212,170,0.03);
+    background: rgba(0, 212, 170, 0.03);
 }
 
-/* Compare blueprint - compact for side-by-side */
-.compare-blueprint {
+.cmp-empty-icon {
+    font-size: 32px;
+    opacity: 0.5;
+}
+
+/* Blueprint container */
+.cmp-blueprint {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+/* Socket card */
+.cmp-socket {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.cmp-socket-hdr {
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.cmp-socket-body {
+    padding: 10px;
     display: flex;
     flex-direction: column;
     gap: 8px;
 }
 
-.compare-socket {
-    background: var(--bg-secondary);
+/* NUMA block */
+.cmp-numa {
+    background: var(--bg-primary);
     border: 1px solid var(--border-subtle);
     border-radius: 4px;
     padding: 8px;
 }
 
-.compare-socket-label {
-    font-size: 9px;
-    font-weight: 600;
-    color: var(--accent);
-    margin-bottom: 6px;
-}
-
-.compare-numa {
-    background: var(--bg-tertiary);
-    border: 1px dashed var(--border-muted);
-    border-radius: 4px;
-    padding: 6px;
-    margin-bottom: 6px;
-}
-
-.compare-numa:last-child { margin-bottom: 0; }
-
-.compare-numa.is-network {
+.cmp-numa.is-net {
     border-color: var(--warning);
-    border-style: solid;
+    border-width: 2px;
 }
 
-.compare-numa-label {
+.cmp-numa-hdr {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.cmp-numa-hdr .net-tag {
     font-size: 8px;
-    color: var(--text-muted);
-    margin-bottom: 4px;
+    font-weight: 700;
+    padding: 2px 5px;
+    background: var(--warning);
+    color: var(--bg-primary);
+    border-radius: 3px;
 }
 
-.compare-cores {
+/* Cores grid */
+.cmp-cores {
     display: flex;
     flex-wrap: wrap;
-    gap: 2px;
+    gap: 3px;
 }
 
-.compare-core {
-    width: 22px;
-    height: 22px;
+/* Individual core */
+.cmp-core {
+    width: 26px;
+    height: 26px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 8px;
+    font-size: 9px;
     font-weight: 500;
-    background: var(--bg-primary);
+    background: var(--bg-tertiary);
     border: 1px solid var(--border-subtle);
-    border-radius: 3px;
-    transition: all 0.15s ease;
+    border-radius: 4px;
+    cursor: default;
+    transition: transform 0.1s ease, box-shadow 0.15s ease;
+    position: relative;
 }
 
-.compare-core.has-role {
+.cmp-core:hover {
+    transform: scale(1.15);
+    z-index: 10;
+}
+
+.cmp-core.has-role {
     color: #fff;
-    text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
 }
 
-.compare-core.isolated {
+.cmp-core.is-isolated {
     border-style: dashed;
+    border-width: 2px;
 }
 
-/* Diff highlights */
-.compare-core.diff-added {
-    box-shadow: 0 0 0 2px var(--success);
+/* Diff highlights - glowing effect */
+.cmp-core.diff-added {
+    box-shadow: 0 0 0 2px var(--success), 0 0 8px var(--success);
 }
 
-.compare-core.diff-removed {
-    box-shadow: 0 0 0 2px var(--error);
+.cmp-core.diff-removed {
+    box-shadow: 0 0 0 2px var(--error), 0 0 8px var(--error);
 }
 
-.compare-core.diff-changed {
-    box-shadow: 0 0 0 2px var(--warning);
+.cmp-core.diff-changed {
+    box-shadow: 0 0 0 2px var(--warning), 0 0 8px var(--warning);
+}
+
+/* Responsive - stack on small screens */
+@media (max-width: 900px) {
+    .cmp-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .cmp-side {
+        border-right: none;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+    
+    .cmp-side:last-child {
+        border-bottom: none;
+    }
 }
 
 /* ===== OPTIMIZE TAB ===== */
