@@ -27,10 +27,10 @@ HFT CPU Mapper provides real-time visualization of CPU core allocation across NU
 chmod +x cpu-map.sh
 
 # Run against target server
-./cpu-map.sh trade0526 > output.txt
+./cpu-map.sh <host> > output.txt
 
 # Or with custom duration for load measurement
-./cpu-map.sh trade0526 30 > output.txt
+./cpu-map.sh <host> 30 > output.txt
 ```
 
 ### 2. Visualize
@@ -63,7 +63,7 @@ Based on internal BenderServer documentation:
 ### Network NUMA Node (NIC-attached)
 ```
 ├── IRQ handlers (mandatory)
-├── Gateways SSS+ tier (clean L3)
+├── Gateways (clean L3)
 ├── Trash (must be here)
 └── UDP (if traffic > 10k pps)
 ```
@@ -71,7 +71,7 @@ Based on internal BenderServer documentation:
 ### Logic NUMA Node
 ```
 ├── Diamond tier Robots (clean L3, shared with Gateways ideal)
-├── Gold/Silver tier Robots (can be cross-NUMA)
+├── Robots (can be cross-NUMA)
 ├── AR (AllRobots) — never with Trash!
 ├── RF (RemoteFormula) — can share with AR or Trash
 └── Formula — usually on AR core, rarely dedicated
@@ -124,7 +124,7 @@ The `cpu-map.sh` script collects:
 
 ```
 @@HFT_CPU_MAP_V4@@
-HOST:trade0526
+HOST:<host>
 DATE:2024-12-13T15:30:00+00:00
 @@LSCPU@@
 0,0,0,0,0,Y
@@ -204,8 +204,6 @@ python -m http.server 8080
 
 ## Related Resources
 
-- [BenderServer Documentation](https://confluence.qb.loc/display/DEV/BenderServer)
-- [Grafana HFT Analytics](https://metrics.qb.loc/d/bender_hft_analytics_v2/)
 - [Performance Tuning Guide](https://github.com/alexkachanov/performance)
 
 ## Changelog
@@ -227,6 +225,3 @@ python -m http.server 8080
 - Basic topology visualization
 - Role painting
 
----
-
-**Internal Tool** — For use within QB trading infrastructure only.
