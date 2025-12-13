@@ -1,0 +1,32 @@
+# GitLab CI/CD Pipeline для HFT CPU Mapper
+# Деплой статического сайта на GitLab Pages
+
+stages:
+  - deploy
+
+pages:
+  stage: deploy
+  image: alpine:latest
+  script:
+    # GitLab Pages требует папку 'public'
+    - mkdir -p public
+    - cp index.html public/
+    - cp styles.css public/
+    - cp app.js public/
+    - cp hft-rules.js public/
+    - cp cpu-map.sh public/
+    - cp README.md public/
+    # Показать что задеплоили
+    - ls -la public/
+  artifacts:
+    paths:
+      - public
+    expire_in: 30 days
+  rules:
+    # Деплоить только из main/master ветки
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  environment:
+    name: production
+    url: $CI_PAGES_URL
+  tags:
+    - docker  # или убери если используешь shared runners
