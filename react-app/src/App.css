@@ -1,25 +1,26 @@
-/* CSS Variables - Retro Dark Theme (Win95 style - softer) */
+/* CSS Variables - Dark Win98 Theme (muted gray/blue) */
 :root {
-  --bg-app: #0a0a1a;
-  --bg-sidebar: #101025;
-  --bg-card: #0d0d20;
-  --bg-panel: #151530;
-  --border-light: #2a4a6a;
-  --border-raised: #4a8090 #1a3040 #1a3040 #4a8090;
-  --border-sunken: #1a3040 #4a8090 #4a8090 #1a3040;
-  --text-primary: #70c0c0;
-  --text-secondary: #509090;
-  --text-muted: #305050;
-  --accent: #4090a0;
-  --accent-hover: #60b0c0;
-  --success: #40a040;
+  --bg-app: #1a1a2e;
+  --bg-sidebar: #16213e;
+  --bg-card: #1f1f3a;
+  --bg-panel: #252545;
+  --border-light: #404060;
+  --border-dark: #101020;
+  --border-raised: #505070 #202030 #202030 #505070;
+  --border-sunken: #202030 #505070 #505070 #202030;
+  --text-primary: #b8b8c8;
+  --text-secondary: #8888a0;
+  --text-muted: #606080;
+  --accent: #4040a0;
+  --accent-hover: #5050c0;
+  --success: #408040;
   --warning: #a0a040;
   --danger: #a04040;
   --sidebar-width: 300px;
   --header-height: 56px;
   --radius: 0px;
   --font-mono: 'Courier New', 'Lucida Console', monospace;
-  --font-retro: 'Courier New', 'Fixedsys', monospace;
+  --font-retro: 'Tahoma', 'Arial', sans-serif;
 }
 
 * {
@@ -33,7 +34,7 @@ body {
   background: var(--bg-app);
   color: var(--text-primary);
   line-height: 1.5;
-  image-rendering: pixelated;
+  font-size: 12px;
 }
 
 .app {
