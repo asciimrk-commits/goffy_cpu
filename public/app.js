@@ -16,13 +16,13 @@ const HFT = {
         instances: { Physical: {} },
         networkInterfaces: []
     },
-    
+
     activeTool: null,
     isMouseDown: false,
     compareOld: null,
     compareNew: null,
     proposedConfig: null,
-    
+
     init() {
         this.initPalette();
         this.initTabs();
@@ -31,18 +31,18 @@ const HFT = {
         this.initSidebar();
         this.activeTool = HFT_RULES.roles.robot_default;
     },
-    
+
     initPalette() {
         const container = document.getElementById('palette');
         if (!container) return;
-        
+
         let html = '';
         const categories = ['system', 'network', 'gateway', 'logic'];
-        
+
         categories.forEach(catId => {
             const cat = HFT_RULES.categories[catId];
             html += `<div class="palette-category">${cat.name}</div>`;
-            
+
             cat.roles.forEach(roleId => {
                 const role = HFT_RULES.roles[roleId];
                 if (role && !role.isStateFlag) {
@@ -54,17 +54,17 @@ const HFT = {
                 }
             });
         });
-        
+
         const isolated = HFT_RULES.roles.isolated;
         html += `<div class="palette-category">State</div>`;
         html += `<div class="palette-item" data-role="isolated" onclick="HFT.selectTool('isolated')">
             <div class="palette-swatch" style="background:transparent;border:2px dashed ${isolated.color}"></div>
             <span>${isolated.name}</span>
         </div>`;
-        
+
         container.innerHTML = html;
     },
-    
+
     initTabs() {
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -76,7 +76,7 @@ const HFT = {
             });
         });
     },
-    
+
     initDragDrop() {
         ['compare-old', 'compare-new'].forEach(id => {
             const container = document.getElementById(id);
@@ -91,25 +91,25 @@ const HFT = {
             });
         });
     },
-    
+
     initKeyboard() {
         document.addEventListener('keydown', (e) => { if (e.key === '[') this.toggleSidebar(); });
         document.addEventListener('mouseup', () => { this.isMouseDown = false; });
     },
-    
+
     initSidebar() {
         document.getElementById('sidebarToggle')?.addEventListener('click', () => this.toggleSidebar());
     },
-    
+
     toggleSidebar() {
         document.getElementById('sidebar')?.classList.toggle('collapsed');
     },
-    
+
     selectTool(roleId) {
         this.activeTool = HFT_RULES.roles[roleId];
         document.querySelectorAll('.palette-item').forEach(item => item.classList.toggle('active', item.dataset.role === roleId));
     },
-    
+
     // =========================================================================
     // PARSING - v4.5 Fixed BENDER parsing
     // =========================================================================
@@ -119,10 +119,10 @@ const HFT = {
             netNumaNodes: new Set(), isolatedCores: new Set(), coreIRQMap: {},
             cpuLoadMap: {}, instances: { Physical: {} }, networkInterfaces: []
         };
-        
+
         const lines = text.split('\n');
         let mode = 'none';
-        
+
         // Role mapping from BENDER keys
         const ROLE_MAP = {
             'GatewaysDefault': 'gateway',
@@ -137,15 +137,15 @@ const HFT = {
             'UdpSendCores': 'udp',
             'Formula': 'formula'
         };
-        
+
         // Временные структуры для парсинга BENDER
         const benderCpuInfo = {}; // cpu -> { isolated, net_cpu, roles: [] }
         const benderNetCpus = new Set(); // IRQ ядра из BENDER_NET (только короткие записи)
-        
+
         for (let line of lines) {
             line = line.trim();
             if (!line) continue;
-            
+
             // Section detection
             if (line === '@@HFT_CPU_MAP_V4@@') { mode = 'v4'; continue; }
             if (line.startsWith('@@') && line.endsWith('@@')) {
@@ -153,7 +153,7 @@ const HFT = {
                 continue;
             }
             if (line.startsWith('HOST:')) { this.state.serverName = line.split(':')[1]; continue; }
-            
+
             // LSCPU parsing
             if (mode === 'lscpu') {
                 if (line.startsWith('CPU') || line.startsWith('#')) continue;
@@ -161,42 +161,42 @@ const HFT = {
                 if (parts.length < 5) continue;
                 const [cpu, node, socket, , l3id] = parts.map(p => p.trim());
                 if (node === '-' || socket === '-') continue;
-                
+
                 this.state.coreNumaMap[cpu] = node;
                 if (!this.state.geometry[socket]) this.state.geometry[socket] = {};
                 if (!this.state.geometry[socket][node]) this.state.geometry[socket][node] = {};
                 const l3 = l3id || node;
                 if (!this.state.geometry[socket][node][l3]) this.state.geometry[socket][node][l3] = [];
                 this.state.geometry[socket][node][l3].push(cpu);
-                
+
                 const l3Key = `${socket}-${node}-${l3}`;
                 if (!this.state.l3Groups[l3Key]) this.state.l3Groups[l3Key] = [];
                 this.state.l3Groups[l3Key].push(cpu);
             }
-            
+
             // NUMA fallback - строим топологию если LSCPU пустой
             if (mode === 'numa') {
                 const numaMatch = line.match(/node\s+(\d+)\s+cpus?:\s*([\d\s,\-]+)/i);
                 if (numaMatch) {
                     const node = numaMatch[1];
                     const cpuList = numaMatch[2].replace(/\s+/g, ',');
-                    
+
                     this.parseRange(cpuList).forEach(cpu => {
                         const cpuStr = cpu.toString();
                         if (!this.state.coreNumaMap[cpuStr]) {
                             this.state.coreNumaMap[cpuStr] = node;
-                            
+
                             // Определяем socket по номеру NUMA (2 NUMA на сокет обычно)
                             const socket = Math.floor(parseInt(node) / 2).toString();
                             const l3id = node; // L3 = NUMA в fallback режиме
-                            
+
                             if (!this.state.geometry[socket]) this.state.geometry[socket] = {};
                             if (!this.state.geometry[socket][node]) this.state.geometry[socket][node] = {};
                             if (!this.state.geometry[socket][node][l3id]) this.state.geometry[socket][node][l3id] = [];
                             if (!this.state.geometry[socket][node][l3id].includes(cpuStr)) {
                                 this.state.geometry[socket][node][l3id].push(cpuStr);
                             }
-                            
+
                             const l3Key = `${socket}-${node}-${l3id}`;
                             if (!this.state.l3Groups[l3Key]) this.state.l3Groups[l3Key] = [];
                             if (!this.state.l3Groups[l3Key].includes(cpuStr)) {
@@ -206,12 +206,12 @@ const HFT = {
                     });
                 }
             }
-            
+
             // ISOLATED
             if (mode === 'isolated' && line !== 'none' && line !== 'N/A') {
                 this.parseRange(line).forEach(c => this.state.isolatedCores.add(c.toString()));
             }
-            
+
             // NETWORK (from script)
             if (mode === 'network') {
                 if (line.startsWith('IF:')) {
@@ -220,25 +220,25 @@ const HFT = {
                     if (parts.NUMA && parts.NUMA !== '-1') this.state.netNumaNodes.add(parts.NUMA);
                 }
             }
-            
+
             // BENDER - Parse cpu_id lines
             if (mode === 'bender' || mode === 'runtime') {
                 const cpuIdMatch = line.match(/\{?\s*cpu_id[:\s]*(\d+)/);
                 if (cpuIdMatch) {
                     const cpu = cpuIdMatch[1];
                     if (!benderCpuInfo[cpu]) benderCpuInfo[cpu] = { isolated: false, net_cpu: false, roles: [] };
-                    
+
                     // Проверяем isolated
                     if (/isolated[:\s]*True/i.test(line)) {
                         benderCpuInfo[cpu].isolated = true;
                         this.state.isolatedCores.add(cpu);
                     }
-                    
+
                     // Проверяем net_cpu (это IRQ ядра!)
                     if (/net_cpu[:\s]*\[/i.test(line)) {
                         benderCpuInfo[cpu].net_cpu = true;
                     }
-                    
+
                     // Извлекаем роли
                     Object.entries(ROLE_MAP).forEach(([key, role]) => {
                         const pattern = new RegExp(key + '[:\\s]*\\[', 'i');
@@ -246,7 +246,7 @@ const HFT = {
                             benderCpuInfo[cpu].roles.push(role);
                         }
                     });
-                    
+
                     // Пустое ядро (только cpu_id, без ролей и без isolated) = OS
                     const hasContent = /isolated|net_cpu|Gateways|Robots|AllRobots|Remote|Click|Trash|Udp|Formula/i.test(line);
                     if (!hasContent) {
@@ -254,7 +254,7 @@ const HFT = {
                     }
                 }
             }
-            
+
             // BENDER_NET - ТОЛЬКО короткие записи это IRQ ядра
             if (mode === 'bender_net') {
                 // net0: 2,4 - это IRQ ядра (короткий список)
@@ -274,7 +274,7 @@ const HFT = {
                     }
                 }
             }
-            
+
             // LOAD
             if (mode === 'load' || mode === 'cpuload') {
                 const loadMatch = line.match(/^(\d+)[:\s]*([\d.]+)$/);
@@ -283,11 +283,11 @@ const HFT = {
                 }
             }
         }
-        
+
         // =====================================================================
         // POST-PROCESSING: Применяем собранную информацию из BENDER
         // =====================================================================
-        
+
         Object.entries(benderCpuInfo).forEach(([cpu, info]) => {
             // IRQ ядра: net_cpu:True ИЛИ в списке BENDER_NET
             if (info.net_cpu || benderNetCpus.has(cpu)) {
@@ -295,21 +295,21 @@ const HFT = {
                 const numa = this.state.coreNumaMap[cpu];
                 if (numa) this.state.netNumaNodes.add(numa);
             }
-            
+
             // OS ядра: пустые (без isolated, без ролей)
             if (info.isOS && !info.isolated && info.roles.length === 0) {
                 this.addTag('Physical', cpu, 'sys_os');
             }
-            
+
             // Применяем роли
             info.roles.forEach(role => {
                 this.addTag('Physical', cpu, role);
             });
         });
-        
+
         return this.state.geometry;
     },
-    
+
     parseRange(str) {
         const result = [];
         if (!str) return result;
@@ -325,53 +325,53 @@ const HFT = {
         });
         return result;
     },
-    
+
     addTag(instanceName, cpu, tag) {
         if (!cpu) return;
         if (!this.state.instances[instanceName]) this.state.instances[instanceName] = {};
         if (!this.state.instances[instanceName][cpu]) this.state.instances[instanceName][cpu] = new Set();
         this.state.instances[instanceName][cpu].add(tag);
     },
-    
+
     // =========================================================================
     // RENDERING
     // =========================================================================
     render() {
         const input = document.getElementById('inputData')?.value || '';
         const geometry = this.parse(input);
-        
+
         if (Object.keys(geometry).length === 0) {
             document.getElementById('canvas').innerHTML = `
                 <div class="canvas-empty"><div class="empty-icon">⚠</div>
                 <p>No valid CPU data found</p></div>`;
             return;
         }
-        
+
         this.updateHeader();
         this.renderBlueprint();
         this.updateStats();
         this.calculateSizing();
     },
-    
+
     updateHeader() {
         const subtitle = document.getElementById('header-subtitle');
         if (subtitle) {
-            subtitle.textContent = this.state.serverName 
+            subtitle.textContent = this.state.serverName
                 ? `${this.state.serverName}.qb.loc | ${new Date().toLocaleString()}` : 'Ready';
         }
-        
+
         const allCores = Object.keys(this.state.coreNumaMap);
         const usedCores = Object.keys(this.state.instances.Physical || {})
             .filter(cpu => this.state.instances.Physical[cpu]?.size > 0);
-        
+
         let totalLoad = 0, loadCount = 0;
         allCores.forEach(cpu => {
             const load = parseFloat(this.state.cpuLoadMap[cpu] || 0);
             if (load > 0) { totalLoad += load; loadCount++; }
         });
-        
+
         const numSockets = Object.keys(this.state.geometry).length;
-        
+
         document.getElementById('stat-total').textContent = allCores.length;
         document.getElementById('stat-used').textContent = usedCores.length;
         document.getElementById('stat-free').textContent = allCores.length - usedCores.length;
@@ -379,17 +379,17 @@ const HFT = {
         document.getElementById('stat-net').textContent = this.state.netNumaNodes.size > 0 ? [...this.state.netNumaNodes].join(',') : '—';
         document.getElementById('stat-load').textContent = loadCount > 0 ? (totalLoad / loadCount).toFixed(0) + '%' : '—';
     },
-    
+
     renderBlueprint() {
         const canvas = document.getElementById('canvas');
         const geometry = this.state.geometry;
-        
+
         const totalCores = Object.keys(this.state.coreNumaMap).length;
         let sizeClass = totalCores > 128 ? 'cores-small' : (totalCores > 64 ? 'cores-medium' : (totalCores <= 24 ? 'cores-xlarge' : 'cores-large'));
-        
+
         let html = `<div class="blueprint ${sizeClass}">`;
         const sockets = Object.keys(geometry).sort((a, b) => parseInt(a) - parseInt(b));
-        
+
         for (let i = 0; i < sockets.length; i += 2) {
             html += '<div class="sockets-row">';
             for (let j = i; j < Math.min(i + 2, sockets.length); j++) {
@@ -397,22 +397,22 @@ const HFT = {
             }
             html += '</div>';
         }
-        
+
         html += '</div>';
         canvas.innerHTML = html;
         Object.keys(this.state.coreNumaMap).forEach(cpu => this.updateCoreVisual('Physical', cpu));
     },
-    
+
     renderSocket(socketId, numaData) {
         let html = `<div class="socket" data-socket="${socketId}">`;
         html += `<div class="socket-label">SOCKET ${socketId}</div><div class="socket-content">`;
-        
+
         Object.keys(numaData).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
             const isNetwork = this.state.netNumaNodes.has(numaId);
             html += `<div class="numa ${isNetwork ? 'is-network' : ''}" data-numa="${numaId}">`;
             html += `<div class="numa-label">NUMA ${numaId}</div>`;
             if (isNetwork) html += '<div class="network-badge">NET</div>';
-            
+
             Object.keys(numaData[numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
                 html += `<div class="l3"><div class="l3-label">L3 #${l3Id}</div><div class="cores-grid">`;
                 numaData[numaId][l3Id].forEach(cpu => { html += this.renderCore('Physical', cpu); });
@@ -420,16 +420,16 @@ const HFT = {
             });
             html += '</div>';
         });
-        
+
         html += '</div></div>';
         return html;
     },
-    
+
     renderCore(instanceName, cpu) {
         const load = parseFloat(this.state.cpuLoadMap[cpu] || 0);
         const loadColor = load > 80 ? '#ef4444' : (load > 50 ? '#f59e0b' : '#22c55e');
         const hasIRQ = this.state.coreIRQMap[cpu]?.length > 0;
-        
+
         return `<div class="core" id="core-${instanceName}-${cpu}" data-cpu="${cpu}"
                  onmousedown="HFT.onCoreMouseDown(event, '${instanceName}', '${cpu}')"
                  onmouseenter="HFT.onCoreMouseEnter(event, '${instanceName}', '${cpu}')"
@@ -439,7 +439,7 @@ const HFT = {
             ${hasIRQ ? '<div class="irq-dot"></div>' : ''}
         </div>`;
     },
-    
+
     getDisplayTags(instanceName, cpu) {
         const allTags = new Set();
         if (this.state.instances.Physical?.[cpu]) this.state.instances.Physical[cpu].forEach(t => allTags.add(t));
@@ -450,22 +450,22 @@ const HFT = {
         });
         return Array.from(allTags).sort((a, b) => (HFT_RULES.roles[b]?.priority || 0) - (HFT_RULES.roles[a]?.priority || 0));
     },
-    
+
     updateCoreVisual(instanceName, cpu) {
         const el = document.getElementById(`core-${instanceName}-${cpu}`);
         if (!el) return;
-        
+
         const tags = this.getDisplayTags(instanceName, cpu);
         const fillTags = tags.filter(t => t !== 'isolated');
         const isIsolated = tags.includes('isolated') || this.state.isolatedCores.has(cpu);
-        
+
         el.classList.remove('has-role', 'isolated');
         el.style.background = '';
         el.style.borderColor = '';
-        
+
         if (fillTags.length > 0) el.classList.add('has-role');
         if (isIsolated) el.classList.add('isolated');
-        
+
         if (fillTags.length === 1) {
             const role = HFT_RULES.roles[fillTags[0]];
             if (role) { el.style.background = role.color; el.style.borderColor = role.color; }
@@ -477,7 +477,7 @@ const HFT = {
             el.style.borderColor = 'rgba(255,255,255,0.3)';
         }
     },
-    
+
     // =========================================================================
     // INTERACTIONS
     // =========================================================================
@@ -485,19 +485,19 @@ const HFT = {
         this.isMouseDown = true;
         this.applyTool(instanceName, cpu, false, event.ctrlKey || event.metaKey);
     },
-    
+
     onCoreMouseEnter(event, instanceName, cpu) {
         if (this.isMouseDown) this.applyTool(instanceName, cpu, true, event.ctrlKey || event.metaKey);
         this.showTooltip(event, instanceName, cpu);
     },
-    
+
     applyTool(instanceName, cpu, forceAdd, isEraser) {
         if (!this.activeTool) return;
         if (!this.state.instances[instanceName]) this.state.instances[instanceName] = {};
         if (!this.state.instances[instanceName][cpu]) this.state.instances[instanceName][cpu] = new Set();
-        
+
         const tags = this.state.instances[instanceName][cpu];
-        
+
         if (isEraser) { tags.clear(); }
         else if (this.activeTool.id === 'isolated') {
             if (this.state.isolatedCores.has(cpu)) this.state.isolatedCores.delete(cpu);
@@ -505,12 +505,12 @@ const HFT = {
         }
         else if (tags.has(this.activeTool.id) && !forceAdd) tags.delete(this.activeTool.id);
         else tags.add(this.activeTool.id);
-        
+
         this.updateCoreVisual(instanceName, cpu);
         this.updateStats();
         this.calculateSizing();
     },
-    
+
     // =========================================================================
     // TOOLTIP
     // =========================================================================
@@ -520,7 +520,7 @@ const HFT = {
         const load = this.state.cpuLoadMap[cpu];
         const irqs = this.state.coreIRQMap[cpu];
         const isIsolated = this.state.isolatedCores.has(cpu);
-        
+
         let html = `<div class="tooltip-header">Core ${cpu}</div>`;
         if (load !== undefined) {
             const color = parseFloat(load) > 80 ? '#ef4444' : (parseFloat(load) > 50 ? '#f59e0b' : '#22c55e');
@@ -536,20 +536,20 @@ const HFT = {
             });
             html += '</div>';
         }
-        
+
         tooltip.innerHTML = html;
         tooltip.style.display = 'block';
         this.moveTooltip(event);
     },
-    
+
     moveTooltip(event) {
         const tooltip = document.getElementById('tooltip');
         tooltip.style.left = (event.clientX + 15) + 'px';
         tooltip.style.top = (event.clientY + 15) + 'px';
     },
-    
+
     hideTooltip() { document.getElementById('tooltip').style.display = 'none'; },
-    
+
     // =========================================================================
     // STATS & OUTPUT
     // =========================================================================
@@ -569,7 +569,7 @@ const HFT = {
         'formula': 'Formula',
         'click': 'ClickHouseCores'
     },
-    
+
     // BENDER name to role ID mapping (for parsing)
     benderToRole: {
         'UdpReceiveCores': 'udp',
@@ -590,29 +590,29 @@ const HFT = {
         'ClickHouseCores': 'click',
         'Isolated': 'isolated'
     },
-    
+
     updateStats() {
         const physicalRoles = {};
         const allCpus = new Set();
-        
+
         Object.entries(this.state.instances.Physical || {}).forEach(([cpu, tags]) => {
             allCpus.add(parseInt(cpu));
-            tags.forEach(t => { 
-                if (!physicalRoles[t]) physicalRoles[t] = []; 
-                physicalRoles[t].push(parseInt(cpu)); 
+            tags.forEach(t => {
+                if (!physicalRoles[t]) physicalRoles[t] = [];
+                physicalRoles[t].push(parseInt(cpu));
             });
         });
-        
+
         // Collect system cores (OS)
         const sysCores = (physicalRoles['sys_os'] || []).sort((a,b) => a-b);
-        
+
         // Collect isolated cores
         const isolatedCores = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a,b) => a-b);
-        
+
         // Build BENDER format output
         let txt = '{';
         const entries = [];
-        
+
         // Add roles in BENDER format
         Object.entries(this.roleToBender).forEach(([roleId, benderName]) => {
             if (benderName && physicalRoles[roleId]?.length > 0) {
@@ -620,25 +620,25 @@ const HFT = {
                 entries.push(`'${benderName}': [${cores.join(', ')}]`);
             }
         });
-        
+
         // Add Isolated
         if (isolatedCores.length > 0) {
             entries.push(`'Isolated': [${isolatedCores.join(', ')}]`);
         }
-        
+
         txt += entries.join(',\n ');
         txt += '}\n';
-        
+
         // Add stats
         const cpuCount = Object.keys(this.state.coreNumaMap).length;
         txt += `Cpu count: ${cpuCount}\n`;
         txt += `System cpus count: ${sysCores.length}\n`;
-        
+
         // Format system cpus as range
         if (sysCores.length > 0) {
             txt += `System cpus: ${this.formatCoreRange(sysCores)}\n`;
         }
-        
+
         // Find unused isolated cpus (isolated but no role)
         const usedCores = new Set();
         Object.values(physicalRoles).forEach(cores => cores.forEach(c => usedCores.add(c)));
@@ -646,7 +646,7 @@ const HFT = {
         if (unusedIsolated.length > 0) {
             txt += `Unused bender isolated cpus: ${this.formatCoreRange(unusedIsolated)}\n`;
         }
-        
+
         // Add NUMA info
         const numaRanges = {};
         Object.entries(this.state.geometry).forEach(([socket, numaData]) => {
@@ -656,11 +656,11 @@ const HFT = {
                 numaRanges[numa] = cores.sort((a,b) => a-b);
             });
         });
-        
+
         Object.keys(numaRanges).sort((a,b) => parseInt(a) - parseInt(b)).forEach(numa => {
             txt += `node${numa}: ${this.formatCoreRange(numaRanges[numa])}\n`;
         });
-        
+
         // Add NET NUMA info
         if (this.state.netNumaNodes.size > 0) {
             txt += '@@BENDER_NET@@\n';
@@ -670,16 +670,16 @@ const HFT = {
                 }
             });
         }
-        
+
         document.getElementById('output').textContent = txt;
     },
-    
+
     formatCoreRange(cores) {
         if (cores.length === 0) return '';
         const sorted = [...cores].sort((a,b) => a-b);
         const ranges = [];
         let start = sorted[0], end = sorted[0];
-        
+
         for (let i = 1; i <= sorted.length; i++) {
             if (i < sorted.length && sorted[i] === end + 1) {
                 end = sorted[i];
@@ -690,19 +690,19 @@ const HFT = {
         }
         return ranges.join(',');
     },
-    
+
     calculateSizing() {
         const osCores = [];
         let totalLoad = 0;
-        
+
         Object.entries(this.state.instances.Physical || {}).forEach(([cpu, tags]) => {
             if (tags.has('sys_os')) { osCores.push(cpu); totalLoad += parseFloat(this.state.cpuLoadMap[cpu] || 0); }
         });
-        
+
         document.getElementById('calc-cores').textContent = osCores.length || '—';
         const avgLoad = osCores.length > 0 ? (totalLoad / osCores.length).toFixed(1) : '—';
         document.getElementById('calc-load').textContent = avgLoad !== '—' ? avgLoad + '%' : '—';
-        
+
         const target = parseFloat(document.getElementById('calc-target')?.value || 3);
         if (osCores.length > 0 && avgLoad !== '—') {
             const needed = Math.ceil((parseFloat(avgLoad) * osCores.length) / target);
@@ -715,12 +715,12 @@ const HFT = {
             }
         } else document.getElementById('calc-result').textContent = '—';
     },
-    
+
     // =========================================================================
     // EXPORT / IMPORT
     // =========================================================================
     copyConfig() { navigator.clipboard.writeText(document.getElementById('output')?.textContent || ''); },
-    
+
     exportConfig() {
         const config = {
             version: '4.5',
@@ -743,7 +743,7 @@ const HFT = {
         a.download = `cpu-config-${this.state.serverName || 'unknown'}-${new Date().toISOString().split('T')[0]}.json`;
         a.click();
     },
-    
+
     importConfig() {
         const input = document.createElement('input');
         input.type = 'file';
@@ -760,7 +760,7 @@ const HFT = {
         };
         input.click();
     },
-    
+
     loadConfig(config) {
         this.state.serverName = config.serverName || '';
         this.state.geometry = config.geometry || {};
@@ -768,7 +768,7 @@ const HFT = {
         this.state.isolatedCores = new Set(config.isolatedCores || []);
         this.state.instances = {};
         this.state.coreNumaMap = {};
-        
+
         Object.entries(this.state.geometry).forEach(([socket, numaData]) => {
             Object.entries(numaData).forEach(([numa, l3Data]) => {
                 Object.entries(l3Data).forEach(([l3, cores]) => {
@@ -776,45 +776,45 @@ const HFT = {
                 });
             });
         });
-        
+
         Object.keys(config.instances || {}).forEach(instName => {
             this.state.instances[instName] = {};
             Object.keys(config.instances[instName]).forEach(cpu => {
                 this.state.instances[instName][cpu] = new Set(config.instances[instName][cpu]);
             });
         });
-        
+
         this.updateHeader();
         this.renderBlueprint();
         this.updateStats();
         this.calculateSizing();
     },
-    
+
     // =========================================================================
     // VALIDATION
     // =========================================================================
     validate() {
         const output = document.getElementById('validation-output');
         if (!output) return;
-        
+
         if (Object.keys(this.state.coreNumaMap).length === 0) {
             output.innerHTML = '<span class="muted">No data</span>';
             return;
         }
-        
+
         const issues = HFT_RULES.runValidation(this.state);
         if (issues.length === 0) {
             output.innerHTML = '<span class="val-ok">✓ All OK</span>';
             return;
         }
-        
+
         output.innerHTML = issues.map(i => {
             const cls = i.severity === 'error' ? 'val-error' : (i.severity === 'warning' ? 'val-warn' : 'val-info');
             const icon = i.severity === 'error' ? '✗' : (i.severity === 'warning' ? '⚠' : 'ℹ');
             return `<div class="${cls}">${icon} ${i.message}</div>`;
         }).join('');
     },
-    
+
     // =========================================================================
     // COMPARE
     // =========================================================================
@@ -825,12 +825,12 @@ const HFT = {
         input.onchange = (e) => {
             const file = e.target.files[0];
             if (!file) return;
-            
+
             const reader = new FileReader();
             reader.onload = (evt) => {
                 const text = evt.target.result;
                 document.getElementById(`cmp-text-${side}`).value = text;
-                
+
                 // Auto-set server name from filename
                 const serverInput = document.getElementById(`cmp-server-${side}`);
                 if (serverInput && !serverInput.value) {
@@ -842,18 +842,18 @@ const HFT = {
         };
         input.click();
     },
-    
+
     parseCompareText(side) {
         const textArea = document.getElementById(`cmp-text-${side}`);
         const serverInput = document.getElementById(`cmp-server-${side}`);
         const text = textArea?.value || '';
         const serverName = serverInput?.value || `Config ${side.toUpperCase()}`;
-        
+
         if (!text.trim()) {
             alert('Paste BENDER config text first');
             return;
         }
-        
+
         try {
             const config = this.parseBenderConfig(text, serverName);
             if (side === 'old') this.compareOld = config;
@@ -864,7 +864,7 @@ const HFT = {
             alert('Parse error: ' + err.message);
         }
     },
-    
+
     parseBenderConfig(text, serverName) {
         const config = {
             serverName: serverName,
@@ -873,17 +873,17 @@ const HFT = {
             isolatedCores: [],
             instances: { Physical: {} }
         };
-        
+
         const lines = text.split('\n');
         const lscpuData = {}; // cpu -> {numa, socket, core, l3}
         const numaRanges = {};
         let currentSection = '';
-        
+
         // First pass: parse all sections
         lines.forEach(line => {
             const trimmed = line.trim();
             if (!trimmed) return;
-            
+
             // Detect sections
             if (trimmed.startsWith('@@')) {
                 if (trimmed.includes('LSCPU')) currentSection = 'lscpu';
@@ -894,7 +894,7 @@ const HFT = {
                 else if (trimmed.includes('BENDER')) currentSection = 'bender';
                 return;
             }
-            
+
             // Parse LSCPU section: CPU,NODE,SOCKET,CORE,L3
             if (currentSection === 'lscpu') {
                 const parts = trimmed.split(',');
@@ -911,7 +911,7 @@ const HFT = {
                 }
                 return;
             }
-            
+
             // Parse NUMA section: "node 0 cpus: 0 1 2 3..."
             if (currentSection === 'numa') {
                 const match = trimmed.match(/node\s*(\d+)\s*cpus?:\s*(.+)/i);
@@ -922,7 +922,7 @@ const HFT = {
                 }
                 return;
             }
-            
+
             // Parse ISOLATED section: "8-95" or "5-93"
             if (currentSection === 'isolated') {
                 if (!trimmed.includes('size:') && !trimmed.includes('node')) {
@@ -933,7 +933,7 @@ const HFT = {
                 }
                 return;
             }
-            
+
             // Parse NETWORK section: "IF:net0|NUMA:1|..."
             if (currentSection === 'network') {
                 const numaMatch = trimmed.match(/NUMA:(\d+)/i);
@@ -945,7 +945,7 @@ const HFT = {
                 }
                 return;
             }
-            
+
             // Parse BENDER section
             if (currentSection === 'bender') {
                 // Format: {'cpu_id': 0, 'isolated': True, 'RobotsDefault': ['OTT4']}
@@ -956,7 +956,7 @@ const HFT = {
                     if (cpuMatch) {
                         const cpu = parseInt(cpuMatch[1]);
                         const cpuStr = String(cpu);
-                        
+
                         // Find all role assignments
                         // Match patterns like: 'RobotsDefault': ['OTT4'] or RobotsDefault:[OTT4]
                         const rolePattern = /['"]?(\w+)['"]?\s*:\s*\[/g;
@@ -964,17 +964,8 @@ const HFT = {
                         while ((match = rolePattern.exec(trimmed)) !== null) {
                             const benderName = match[1];
                             // Skip non-role fields
-                            if (['cpu_id', 'isolated'].includes(benderName)) continue;
+                            if (['cpu_id', 'isolated', 'net_cpu'].includes(benderName)) continue;
 
-                            // Handle net_cpu as net_irq
-                            if (benderName === 'net_cpu') {
-                                if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
-                                if (!config.instances.Physical[cpuStr].includes('net_irq')) {
-                                    config.instances.Physical[cpuStr].push('net_irq');
-                                }
-                                continue;
-                            }
-                            
                             const roleId = this.benderToRole[benderName];
                             if (roleId) {
                                 if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
@@ -986,7 +977,7 @@ const HFT = {
                     }
                     return;
                 }
-                
+
                 // Summary block: {'AllRobotsThCPU': [40], ...} or multiline
                 // Match role: [cores] patterns
                 const summaryPattern = /['"]?(\w+)['"]?\s*:\s*\[([^\]]*)/g;
@@ -994,13 +985,13 @@ const HFT = {
                 while ((match = summaryPattern.exec(trimmed)) !== null) {
                     const benderName = match[1];
                     const coresStr = match[2];
-                    
+
                     // Skip if it looks like instance names like ['OTT4']
                     if (coresStr.includes("'") || coresStr.includes('"')) continue;
-                    
+
                     const cores = this.parseCoreList(coresStr);
                     if (cores.length === 0) continue;
-                    
+
                     if (benderName === 'Isolated') {
                         cores.forEach(c => {
                             if (!config.isolatedCores.includes(c)) config.isolatedCores.push(c);
@@ -1018,29 +1009,13 @@ const HFT = {
                         }
                     }
                 }
-
-                // Infer OS cores (cpu_id present but no roles and not isolated)
-                // This requires us to have tracked which CPUs were mentioned
-                // But in this pass we process line by line.
-                // We need to check for simple {cpu_id:X} lines that have no other roles.
-                // Re-scanning the line for this specific case.
-                if (trimmed.startsWith('{') && trimmed.includes('cpu_id') && !trimmed.includes('isolated') && !trimmed.includes('[')) {
-                    const cpuMatch = trimmed.match(/['"]?cpu_id['"]?\s*:\s*(\d+)/);
-                    if (cpuMatch) {
-                        const cpuStr = String(cpuMatch[1]);
-                        if (!config.instances.Physical[cpuStr] || config.instances.Physical[cpuStr].length === 0) {
-                             if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
-                             config.instances.Physical[cpuStr].push('sys_os');
-                        }
-                    }
-                }
                 return;
             }
-            
+
             // BENDER_NET section - skip, we got net numa from NETWORK
             if (currentSection === 'bender_net') return;
         });
-        
+
         // Build geometry
         // Priority: LSCPU data > NUMA ranges > fallback
         if (Object.keys(lscpuData).length > 0) {
@@ -1049,14 +1024,14 @@ const HFT = {
                 const socketId = String(data.socket);
                 const numaId = String(data.numa);
                 const l3Id = String(data.l3);
-                
+
                 if (!config.geometry[socketId]) config.geometry[socketId] = {};
                 if (!config.geometry[socketId][numaId]) config.geometry[socketId][numaId] = {};
                 if (!config.geometry[socketId][numaId][l3Id]) config.geometry[socketId][numaId][l3Id] = [];
-                
+
                 config.geometry[socketId][numaId][l3Id].push(parseInt(cpu));
             });
-            
+
             // Sort cores within each L3
             Object.values(config.geometry).forEach(socket => {
                 Object.values(socket).forEach(numa => {
@@ -1084,37 +1059,37 @@ const HFT = {
             );
             const cpuCount = maxCore + 1;
             const coresPerNuma = Math.ceil(cpuCount / 4);
-            
+
             for (let numa = 0; numa < 4; numa++) {
                 const socketId = String(Math.floor(numa / 2));
                 const start = numa * coresPerNuma;
                 const end = Math.min(start + coresPerNuma, cpuCount);
                 const cores = [];
                 for (let i = start; i < end; i++) cores.push(i);
-                
+
                 if (!config.geometry[socketId]) config.geometry[socketId] = {};
                 config.geometry[socketId][String(numa)] = { '0': cores };
             }
         }
-        
+
         return config;
     },
-    
+
     parseCoreList(str) {
         // Parse "1, 2, 3" or "1,2,3" or multiline
         const cores = [];
         const cleaned = str.replace(/\s+/g, ' ').trim();
         if (!cleaned) return cores;
-        
+
         cleaned.split(/[,\s]+/).forEach(part => {
             const num = parseInt(part);
             if (!isNaN(num)) cores.push(num);
         });
         return cores;
     },
-    
+
     parseCoreRange(str) {
-        // Parse "0-23" or "0-4,94-95" 
+        // Parse "0-23" or "0-4,94-95"
         const cores = [];
         str.split(',').forEach(part => {
             part = part.trim();
@@ -1130,50 +1105,50 @@ const HFT = {
         });
         return cores;
     },
-    
+
     clearCompare(side) {
         if (side === 'old') this.compareOld = null;
         else this.compareNew = null;
-        
+
         document.getElementById(`compare-${side}`).innerHTML = '';
         document.getElementById(`cmp-text-${side}`).value = '';
         document.getElementById(`cmp-server-${side}`).value = '';
         ['added', 'removed', 'changed'].forEach(k => document.getElementById(`diff-${k}`).textContent = '0');
     },
-    
+
     renderComparePanel(side, config) {
         const container = document.getElementById(`compare-${side}`);
         const geom = config.geometry || {};
         const netNumas = new Set((config.netNumaNodes || []).map(String));
         const isolatedCores = new Set((config.isolatedCores || []).map(String));
         const insts = config.instances || {};
-        
+
         // Collect all used roles for legend
         const usedRoles = new Set();
-        
+
         // Count sockets
         const numSockets = Object.keys(geom).length;
-        
+
         let html = `<div class="cmp-info">Sockets: ${numSockets} | NUMAs: ${Object.values(geom).reduce((acc, s) => acc + Object.keys(s).length, 0)}</div>`;
         html += '<div class="cmp-blueprint">';
-        
+
         Object.keys(geom).sort((a, b) => parseInt(a) - parseInt(b)).forEach(socketId => {
             html += `<div class="cmp-socket">
                 <div class="cmp-socket-hdr">Socket ${socketId}</div>
                 <div class="cmp-socket-body">`;
-            
+
             Object.keys(geom[socketId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
                 const isNet = netNumas.has(String(numaId));
                 const l3Groups = geom[socketId][numaId];
                 const l3Count = Object.keys(l3Groups).length;
-                
+
                 html += `<div class="cmp-numa ${isNet ? 'is-net' : ''}">
                     <div class="cmp-numa-hdr">
                         <span>NUMA ${numaId}</span>
                         ${l3Count > 1 ? `<span class="l3-count">${l3Count} L3</span>` : ''}
                         ${isNet ? '<span class="net-tag">NET</span>' : ''}
                     </div>`;
-                
+
                 // Render L3 groups
                 Object.keys(l3Groups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
                     const hasMultipleL3 = l3Count > 1;
@@ -1182,11 +1157,11 @@ const HFT = {
                         html += `<div class="cmp-l3-label">L3 #${l3Id}</div>`;
                     }
                     html += '<div class="cmp-cores">';
-                    
+
                     l3Groups[l3Id].forEach(cpu => {
                         const cpuStr = String(cpu);
                         const tags = [];
-                        
+
                         // Collect tags from all instances
                         Object.keys(insts).forEach(inst => {
                             const cpuTags = insts[inst][cpuStr] || insts[inst][cpu];
@@ -1195,38 +1170,38 @@ const HFT = {
                                 else if (cpuTags instanceof Set) tags.push(...cpuTags);
                             }
                         });
-                        
+
                         const fillTags = tags.filter(t => t !== 'isolated');
                         const isIsolated = isolatedCores.has(cpuStr) || tags.includes('isolated');
-                        
+
                         let bg = '';
                         let hasRole = false;
                         if (fillTags.length > 0) {
                             const roleId = fillTags[0];
                             const role = HFT_RULES.roles[roleId];
-                            if (role) { 
-                                bg = `background:${role.color};`; 
+                            if (role) {
+                                bg = `background:${role.color};`;
                                 hasRole = true;
                                 usedRoles.add(roleId);
                             }
                         }
-                        
-                        html += `<div class="cmp-core ${hasRole ? 'has-role' : ''} ${isIsolated ? 'is-isolated' : ''}" 
+
+                        html += `<div class="cmp-core ${hasRole ? 'has-role' : ''} ${isIsolated ? 'is-isolated' : ''}"
                             data-cpu="${cpuStr}" data-side="${side}" style="${bg}"
                             onmouseenter="HFT.showCompareTooltip(event,'${side}','${cpuStr}')"
                             onmousemove="HFT.moveTooltip(event)"
                             onmouseleave="HFT.hideTooltip()">${cpu}</div>`;
                     });
-                    
+
                     html += '</div></div>';
                 });
                 html += '</div>';
             });
             html += '</div></div>';
         });
-        
+
         html += '</div>';
-        
+
         // Add legend if there are roles
         if (usedRoles.size > 0) {
             html += '<div class="cmp-legend">';
@@ -1241,17 +1216,17 @@ const HFT = {
             });
             html += '</div>';
         }
-        
+
         container.innerHTML = html;
     },
-    
+
     showCompareTooltip(event, side, cpu) {
         const config = side === 'old' ? this.compareOld : this.compareNew;
         if (!config) return;
-        
+
         const cpuStr = String(cpu);
         const allTags = new Set();
-        
+
         if (config.instances) {
             Object.keys(config.instances).forEach(inst => {
                 const cpuTags = config.instances[inst][cpuStr] || config.instances[inst][cpu];
@@ -1264,11 +1239,11 @@ const HFT = {
                 }
             });
         }
-        
+
         // Check isolated
         const isolatedCores = new Set((config.isolatedCores || []).map(String));
         const isIsolated = isolatedCores.has(cpuStr);
-        
+
         let html = `<div class="tooltip-header">Core ${cpu} (${side.toUpperCase()})</div>`;
         if (isIsolated) {
             html += '<div style="font-size:10px;color:var(--accent);margin-bottom:4px;">⬡ Isolated</div>';
@@ -1283,16 +1258,16 @@ const HFT = {
         } else if (!isIsolated) {
             html += '<div style="color:var(--text-muted)">No roles</div>';
         }
-        
+
         const tooltip = document.getElementById('tooltip');
         tooltip.innerHTML = html;
         tooltip.style.display = 'block';
         this.moveTooltip(event);
     },
-    
+
     calculateDiff() {
         if (!this.compareOld || !this.compareNew) return;
-        
+
         const getTags = (cfg, cpu) => {
             const cpuStr = String(cpu);
             const t = new Set();
@@ -1310,22 +1285,22 @@ const HFT = {
             }
             return t;
         };
-        
+
         const allCpus = new Set();
         [this.compareOld, this.compareNew].forEach(cfg => {
             if (cfg.instances) Object.values(cfg.instances).forEach(inst => Object.keys(inst).forEach(cpu => allCpus.add(cpu)));
         });
-        
+
         let added = 0, removed = 0, changed = 0;
         allCpus.forEach(cpu => {
             const oldTags = getTags(this.compareOld, cpu);
             const newTags = getTags(this.compareNew, cpu);
             const oldEl = document.querySelector(`.cmp-core[data-cpu="${cpu}"][data-side="old"]`);
             const newEl = document.querySelector(`.cmp-core[data-cpu="${cpu}"][data-side="new"]`);
-            
+
             oldEl?.classList.remove('diff-added', 'diff-removed', 'diff-changed');
             newEl?.classList.remove('diff-added', 'diff-removed', 'diff-changed');
-            
+
             if (oldTags.size === 0 && newTags.size > 0) { added++; newEl?.classList.add('diff-added'); }
             else if (oldTags.size > 0 && newTags.size === 0) { removed++; oldEl?.classList.add('diff-removed'); }
             else if (oldTags.size > 0 && newTags.size > 0) {
@@ -1333,48 +1308,48 @@ const HFT = {
                 if (!same) { changed++; oldEl?.classList.add('diff-changed'); newEl?.classList.add('diff-changed'); }
             }
         });
-        
+
         document.getElementById('diff-added').textContent = added;
         document.getElementById('diff-removed').textContent = removed;
         document.getElementById('diff-changed').textContent = changed;
     },
-    
+
     // =========================================================================
     // RECOMMENDATIONS
     // =========================================================================
     generateRecommendation() {
         const output = document.getElementById('recommend-output');
         const btnApply = document.getElementById('btn-apply');
-        
+
         if (Object.keys(this.state.coreNumaMap).length === 0) {
             output.innerHTML = '<div class="recommend-placeholder"><p style="color:#f59e0b;">⚠ Load server data first</p></div>';
             return;
         }
-        
+
         const result = HFT_RULES.generateRecommendation(this.state);
         this.proposedConfig = result.proposedConfig;
-        
+
         output.innerHTML = result.html;
         btnApply.disabled = !result.proposedConfig;
     },
-    
+
     applyRecommendation() {
         if (!this.proposedConfig) return;
-        
+
         // Clear existing roles
         this.state.instances = { Physical: {} };
-        
+
         // Apply proposed config
         Object.entries(this.proposedConfig.instances?.Physical || {}).forEach(([cpu, roles]) => {
             if (!this.state.instances.Physical[cpu]) this.state.instances.Physical[cpu] = new Set();
             roles.forEach(role => this.state.instances.Physical[cpu].add(role));
         });
-        
+
         this.renderBlueprint();
         this.updateStats();
         document.querySelector('.tab[data-tab="mapper"]')?.click();
     },
-    
+
     // =========================================================================
     // DEMO
     // =========================================================================
