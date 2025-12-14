@@ -1092,6 +1092,35 @@ body {
     min-height: 0;
 }
 
+/* Input group styling (Target Load, etc.) */
+.input-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.input-small {
+    width: 50px;
+    padding: 6px 8px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-align: center;
+}
+
+.input-small:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.unit {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
 /* Phase 1: Drag & Drop active state */
 .drag-active {
     outline: 2px dashed var(--accent) !important;
