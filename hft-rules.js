@@ -128,10 +128,24 @@ const HFT_RULES = {
         const numNumas = Object.keys(topology.byNuma).length;
         
         // OS
-        const osCores = netNumaCores.filter(c => !isolatedCores.includes(c));
+        // Fallback: If no non-isolated cores found on Network NUMA (fully isolated setup), use Core 0 + sibling or existing sys_os tags
+        let osCores = netNumaCores.filter(c => !isolatedCores.includes(c));
+        if (osCores.length === 0) {
+            // Check if input had sys_os tags
+            if (currentRoles['sys_os']?.length > 0) {
+                osCores = currentRoles['sys_os'];
+            } else {
+                // Heuristic: Use first 2 cores of net numa (usually 0, 1 or similar) even if isolated
+                osCores = netNumaCores.slice(0, 2);
+                if (osCores.length === 0) osCores = ['0', '1']; // Absolute fallback
+            }
+        }
+
         const osLoad = getLoad(currentRoles['sys_os'] || osCores);
         let osNeeded = Math.max(2, Math.ceil(osLoad * (currentRoles['sys_os']?.length || osCores.length) / 25));
-        osNeeded = Math.min(osNeeded, osCores.length);
+        // If we are forced to use isolated cores for OS, we respect osNeeded, but cap at 4 to be safe if load is weird
+        osNeeded = Math.min(osNeeded, osCores.length > 0 ? osCores.length : 4);
+
         const assignedOsCores = osCores.slice(0, osNeeded);
         assignedOsCores.forEach(cpu => assignRole(cpu, 'sys_os'));
         
@@ -176,7 +190,8 @@ const HFT_RULES = {
         
         // IRQ + Gateways (Mandatory!)
         const neededIrq = Math.max(2, currentRoles['net_irq']?.length || 2);
-        const neededGw = calcNeeded(currentRoles['gateway']);
+        // Add 20% safety margin to Gateway count
+        const neededGw = Math.ceil(calcNeeded(currentRoles['gateway']) * 1.2);
         const gwLoad = getLoad(currentRoles['gateway']);
         
         const workPool = {};

@@ -383,20 +383,16 @@ const HFT = {
     renderBlueprint() {
         const canvas = document.getElementById('canvas');
         const geometry = this.state.geometry;
-
         const totalCores = Object.keys(this.state.coreNumaMap).length;
-        let sizeClass = totalCores > 128 ? 'cores-small' : (totalCores > 64 ? 'cores-medium' : (totalCores <= 24 ? 'cores-xlarge' : 'cores-large'));
 
-        let html = `<div class="blueprint ${sizeClass}">`;
+        // CSS Grid Layout handles most of the structure now
+        let html = `<div class="blueprint">`;
         const sockets = Object.keys(geometry).sort((a, b) => parseInt(a) - parseInt(b));
 
-        for (let i = 0; i < sockets.length; i += 2) {
-            html += '<div class="sockets-row">';
-            for (let j = i; j < Math.min(i + 2, sockets.length); j++) {
-                html += this.renderSocket(sockets[j], geometry[sockets[j]]);
-            }
-            html += '</div>';
-        }
+        // Render Sockets directly into grid
+        sockets.forEach(socketId => {
+            html += this.renderSocket(socketId, geometry[socketId]);
+        });
 
         html += '</div>';
         canvas.innerHTML = html;
@@ -405,13 +401,12 @@ const HFT = {
 
     renderSocket(socketId, numaData) {
         let html = `<div class="socket" data-socket="${socketId}">`;
-        html += `<div class="socket-label">SOCKET ${socketId}</div><div class="socket-content">`;
+        html += `<div class="socket-label"><span>SOCKET ${socketId}</span></div><div class="socket-content">`;
 
         Object.keys(numaData).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
             const isNetwork = this.state.netNumaNodes.has(numaId);
             html += `<div class="numa ${isNetwork ? 'is-network' : ''}" data-numa="${numaId}">`;
-            html += `<div class="numa-label">NUMA ${numaId}</div>`;
-            if (isNetwork) html += '<div class="network-badge">NET</div>';
+            html += `<div class="numa-label"><span>NUMA ${numaId}</span>${isNetwork ? '<span class="network-badge">NET</span>' : ''}</div>`;
 
             Object.keys(numaData[numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
                 html += `<div class="l3"><div class="l3-label">L3 #${l3Id}</div><div class="cores-grid">`;
