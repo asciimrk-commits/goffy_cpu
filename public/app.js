@@ -29,7 +29,13 @@ const HFT = {
         this.initDragDrop();
         this.initKeyboard();
         this.initSidebar();
+        this.initMainDragDrop();
         this.activeTool = HFT_RULES.roles.robot_default;
+
+        // Phase 1: Try to load from URL hash first, then localStorage
+        if (!this.loadFromUrlHash()) {
+            this.restoreFromLocalStorage();
+        }
     },
 
     initPalette() {
@@ -93,7 +99,34 @@ const HFT = {
     },
 
     initKeyboard() {
-        document.addEventListener('keydown', (e) => { if (e.key === '[') this.toggleSidebar(); });
+        document.addEventListener('keydown', (e) => {
+            // Toggle sidebar
+            if (e.key === '[') this.toggleSidebar();
+
+            // Escape - deselect tool
+            if (e.key === 'Escape') {
+                this.activeTool = null;
+                document.querySelectorAll('.palette-item').forEach(item => item.classList.remove('active'));
+            }
+
+            // Ctrl+S - Export config
+            if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                this.exportConfig();
+            }
+
+            // Ctrl+O - Import config
+            if (e.ctrlKey && e.key === 'o') {
+                e.preventDefault();
+                this.importConfig();
+            }
+
+            // Ctrl+L - Copy shareable link
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                this.copyShareLink();
+            }
+        });
         document.addEventListener('mouseup', () => { this.isMouseDown = false; });
     },
 
@@ -351,6 +384,9 @@ const HFT = {
         this.renderBlueprint();
         this.updateStats();
         this.calculateSizing();
+
+        // Auto-save to localStorage
+        this.saveToLocalStorage();
     },
 
     updateHeader() {
@@ -615,10 +651,10 @@ const HFT = {
         });
 
         // Collect system cores (OS)
-        const sysCores = (physicalRoles['sys_os'] || []).sort((a,b) => a-b);
+        const sysCores = (physicalRoles['sys_os'] || []).sort((a, b) => a - b);
 
         // Collect isolated cores
-        const isolatedCores = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a,b) => a-b);
+        const isolatedCores = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a, b) => a - b);
 
         // Build BENDER format output
         let txt = '{';
@@ -627,7 +663,7 @@ const HFT = {
         // Add roles in BENDER format
         Object.entries(this.roleToBender).forEach(([roleId, benderName]) => {
             if (benderName && physicalRoles[roleId]?.length > 0) {
-                const cores = physicalRoles[roleId].sort((a,b) => a-b);
+                const cores = physicalRoles[roleId].sort((a, b) => a - b);
                 entries.push(`'${benderName}': [${cores.join(', ')}]`);
             }
         });
@@ -664,11 +700,11 @@ const HFT = {
             Object.entries(numaData).forEach(([numa, l3Data]) => {
                 const cores = [];
                 Object.values(l3Data).forEach(l3Cores => cores.push(...l3Cores));
-                numaRanges[numa] = cores.sort((a,b) => a-b);
+                numaRanges[numa] = cores.sort((a, b) => a - b);
             });
         });
 
-        Object.keys(numaRanges).sort((a,b) => parseInt(a) - parseInt(b)).forEach(numa => {
+        Object.keys(numaRanges).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numa => {
             txt += `node${numa}: ${this.formatCoreRange(numaRanges[numa])}\n`;
         });
 
@@ -687,7 +723,7 @@ const HFT = {
 
     formatCoreRange(cores) {
         if (cores.length === 0) return '';
-        const sorted = [...cores].sort((a,b) => a-b);
+        const sorted = [...cores].sort((a, b) => a - b);
         const ranges = [];
         let start = sorted[0], end = sorted[0];
 
@@ -1040,8 +1076,8 @@ const HFT = {
                     if (cpuMatch) {
                         const cpuStr = String(cpuMatch[1]);
                         if (!config.instances.Physical[cpuStr] || config.instances.Physical[cpuStr].length === 0) {
-                             if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
-                             config.instances.Physical[cpuStr].push('sys_os');
+                            if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                            config.instances.Physical[cpuStr].push('sys_os');
                         }
                     }
                 }
@@ -1108,6 +1144,26 @@ const HFT = {
             }
         }
 
+        // Post-processing: Infer OS cores
+        // Any core in geometry that is NOT isolated and has no role = OS core
+        const isolatedSet = new Set(config.isolatedCores.map(String));
+        Object.values(config.geometry).forEach(socket => {
+            Object.values(socket).forEach(numa => {
+                Object.values(numa).forEach(cores => {
+                    cores.forEach(cpu => {
+                        const cpuStr = String(cpu);
+                        const hasRole = config.instances.Physical[cpuStr]?.length > 0;
+                        const isIsolated = isolatedSet.has(cpuStr);
+
+                        if (!hasRole && !isIsolated) {
+                            if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                            config.instances.Physical[cpuStr].push('sys_os');
+                        }
+                    });
+                });
+            });
+        });
+
         return config;
     },
 
@@ -1125,7 +1181,7 @@ const HFT = {
     },
 
     parseCoreRange(str) {
-        // Parse "0-23" or "0-4,94-95"
+        // Parse "0-23" or "0-4,94-95" 
         const cores = [];
         str.split(',').forEach(part => {
             part = part.trim();
@@ -1222,7 +1278,7 @@ const HFT = {
                             }
                         }
 
-                        html += `<div class="cmp-core ${hasRole ? 'has-role' : ''} ${isIsolated ? 'is-isolated' : ''}"
+                        html += `<div class="cmp-core ${hasRole ? 'has-role' : ''} ${isIsolated ? 'is-isolated' : ''}" 
                             data-cpu="${cpuStr}" data-side="${side}" style="${bg}"
                             onmouseenter="HFT.showCompareTooltip(event,'${side}','${cpuStr}')"
                             onmousemove="HFT.moveTooltip(event)"
@@ -1474,7 +1530,168 @@ net0: 0-31
 31:25.0
 @@END@@`;
         this.render();
+    },
+
+    // =========================================================================
+    // PHASE 1: LocalStorage Persistence
+    // =========================================================================
+    STORAGE_KEY: 'hft-cpu-mapper-config',
+
+    saveToLocalStorage() {
+        try {
+            const config = {
+                version: '5.0',
+                savedAt: new Date().toISOString(),
+                serverName: this.state.serverName,
+                geometry: this.state.geometry,
+                coreNumaMap: Object.fromEntries(this.state.coreNumaMap),
+                coreSocketMap: Object.fromEntries(this.state.coreSocketMap),
+                isolatedCores: [...this.state.isolatedCores],
+                netNumaNodes: [...this.state.netNumaNodes],
+                l3Groups: this.state.l3Groups,
+                cpuLoadMap: this.state.cpuLoadMap,
+                instances: {
+                    Physical: Object.fromEntries(
+                        Object.entries(this.state.instances.Physical || {}).map(([cpu, tags]) =>
+                            [cpu, tags instanceof Set ? [...tags] : tags]
+                        )
+                    )
+                }
+            };
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(config));
+            console.log('[Storage] Config saved');
+        } catch (e) {
+            console.warn('[Storage] Failed to save:', e);
+        }
+    },
+
+    restoreFromLocalStorage() {
+        try {
+            const saved = localStorage.getItem(this.STORAGE_KEY);
+            if (!saved) return false;
+
+            const config = JSON.parse(saved);
+            if (config && config.geometry && Object.keys(config.geometry).length > 0) {
+                this.loadConfig(config);
+                console.log('[Storage] Config restored from', config.savedAt);
+                return true;
+            }
+        } catch (e) {
+            console.warn('[Storage] Failed to restore:', e);
+        }
+        return false;
+    },
+
+    clearLocalStorage() {
+        localStorage.removeItem(this.STORAGE_KEY);
+        console.log('[Storage] Cleared');
+    },
+
+    // =========================================================================
+    // PHASE 1: URL Hash Config Sharing
+    // =========================================================================
+    loadFromUrlHash() {
+        try {
+            const hash = window.location.hash;
+            if (!hash || !hash.startsWith('#cfg=')) return false;
+
+            const encoded = hash.substring(5); // Remove '#cfg='
+            const json = this.decompressConfig(encoded);
+            if (json) {
+                const config = JSON.parse(json);
+                this.loadConfig(config);
+                console.log('[URL] Config loaded from hash');
+                // Clear hash to avoid confusion
+                history.replaceState(null, '', window.location.pathname);
+                return true;
+            }
+        } catch (e) {
+            console.warn('[URL] Failed to load from hash:', e);
+        }
+        return false;
+    },
+
+    copyShareLink() {
+        try {
+            const config = {
+                v: '5',
+                s: this.state.serverName,
+                g: this.state.geometry,
+                cn: Object.fromEntries(this.state.coreNumaMap),
+                cs: Object.fromEntries(this.state.coreSocketMap),
+                ic: [...this.state.isolatedCores],
+                nn: [...this.state.netNumaNodes],
+                l3: this.state.l3Groups,
+                i: Object.fromEntries(
+                    Object.entries(this.state.instances.Physical || {}).map(([cpu, tags]) =>
+                        [cpu, tags instanceof Set ? [...tags] : tags]
+                    )
+                )
+            };
+
+            const compressed = this.compressConfig(JSON.stringify(config));
+            const url = `${window.location.origin}${window.location.pathname}#cfg=${compressed}`;
+
+            navigator.clipboard.writeText(url).then(() => {
+                alert('✓ Link copied!\n\nShare this URL to let others view your config.');
+            });
+        } catch (e) {
+            console.warn('[URL] Failed to create share link:', e);
+            alert('Failed to create share link');
+        }
+    },
+
+    compressConfig(json) {
+        // Simple base64 encoding (works for moderate configs)
+        // For larger configs, could use pako.js for gzip
+        return btoa(encodeURIComponent(json));
+    },
+
+    decompressConfig(encoded) {
+        try {
+            return decodeURIComponent(atob(encoded));
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // =========================================================================
+    // PHASE 1: Main Input Drag & Drop
+    // =========================================================================
+    initMainDragDrop() {
+        const inputArea = document.getElementById('inputData');
+        if (!inputArea) return;
+
+        const container = inputArea.parentElement;
+
+        container.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            container.classList.add('drag-active');
+        });
+
+        container.addEventListener('dragleave', () => {
+            container.classList.remove('drag-active');
+        });
+
+        container.addEventListener('drop', (e) => {
+            e.preventDefault();
+            container.classList.remove('drag-active');
+
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    inputArea.value = evt.target.result;
+                    // Auto-parse if it looks like valid data
+                    if (evt.target.result.includes('@@')) {
+                        this.render();
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
     }
 };
 
 document.addEventListener('DOMContentLoaded', () => HFT.init());
+
