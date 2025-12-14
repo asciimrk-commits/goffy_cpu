@@ -61,7 +61,8 @@ The color palette is designed for semantic clarity:
 Based on internal BenderServer documentation:
 
 ### Network NUMA Node (NIC-attached)
-```
+
+```text
 ├── IRQ handlers (mandatory)
 ├── Gateways (clean L3)
 ├── Trash (must be here)
@@ -69,7 +70,8 @@ Based on internal BenderServer documentation:
 ```
 
 ### Logic NUMA Node
-```
+
+```text
 ├── Diamond tier Robots (clean L3, shared with Gateways ideal)
 ├── Robots (can be cross-NUMA)
 ├── AR (AllRobots) — never with Trash!
@@ -78,7 +80,8 @@ Based on internal BenderServer documentation:
 ```
 
 ### OS Cores
-```
+
+```text
 ├── Core 0 + hyperthread
 ├── Scale based on load average
 └── ~20% target utilization
@@ -99,7 +102,7 @@ The tool automatically checks for:
 
 ## File Structure
 
-```
+```text
 hft-cpu-mapper/
 ├── index.html          # Main application
 ├── styles.css          # UI styles (dark theme)
@@ -122,7 +125,7 @@ The `cpu-map.sh` script collects:
 
 ### Output Format (v4)
 
-```
+```text
 @@HFT_CPU_MAP_V4@@
 HOST:<host>
 DATE:2024-12-13T15:30:00+00:00
@@ -209,6 +212,7 @@ python -m http.server 8080
 ## Changelog
 
 ### v4.0 (2024-12)
+
 - Complete UI redesign with semantic color scheme
 - Professional compare view with subtle diff highlighting
 - Auto-optimization engine with offline AI recommendations
@@ -216,12 +220,13 @@ python -m http.server 8080
 - Validation rules based on BenderServer best practices
 
 ### v3.7
+
 - Multi-thread view
 - IRQ visualization
 - Load bar indicators
 
 ### v3.0
+
 - Initial public release
 - Basic topology visualization
 - Role painting
-
