@@ -5,40 +5,50 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 :root {
-    /* Colors - Professional Slate Palette */
-    --bg-app: #0f172a;
-    --bg-sidebar: #1e293b;
-    --bg-card: #1e293b;
-    --bg-header: #1e293b;
-    --bg-panel: #334155;
+    /* Colors - Technical Drawing / Blueprint */
+    --bg-app: #111111;
+    --bg-sidebar: #111111;
+    --bg-card: #111111;
+    --bg-header: #111111;
+    --bg-panel: #1a1a1a;
 
-    --border-light: #334155;
-    --border-active: #475569;
+    --border-light: #555555; /* High contrast lines */
+    --border-active: #aaaaaa;
 
-    --text-primary: #f1f5f9;
-    --text-secondary: #cbd5e1;
-    --text-muted: #94a3b8;
+    --text-primary: #ffffff;
+    --text-secondary: #dddddd;
+    --text-muted: #aaaaaa;
 
-    /* Accents - Cleaner, less neon */
-    --accent: #3b82f6;       /* Blue-500 */
-    --accent-hover: #2563eb; /* Blue-600 */
-    --accent-light: rgba(59, 130, 246, 0.1);
+    /* Accents */
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --accent-light: rgba(59, 130, 246, 0.2);
 
-    /* Status Colors */
-    --success: #10b981;
-    --warning: #f59e0b;
-    --error: #ef4444;
-    --info: #0ea5e9;
+    /* Status Colors - Bright */
+    --success: #00ff99;
+    --warning: #ffcc00;
+    --error: #ff3333;
+    --info: #00ccff;
 
     /* Layout */
     --sidebar-width: 280px;
     --header-height: 64px;
-    --radius: 6px;
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    --radius: 0px; /* STRICT */
+    --shadow-sm: none;
+    --shadow-md: none;
 
-    --font-ui: 'Inter', sans-serif;
+    --font-ui: 'JetBrains Mono', monospace; /* STRICT */
     --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Remove spinners */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -271,7 +281,7 @@ html, body {
 .socket {
     background: var(--bg-card);
     border: 1px solid var(--border-light);
-    border-radius: 8px;
+    border-radius: 0;
     padding: 16px;
     box-shadow: var(--shadow-sm);
     display: flex;
@@ -299,7 +309,7 @@ html, body {
 .numa {
     background: rgba(15, 23, 42, 0.3); /* Slightly darker inner bg */
     border: 1px solid var(--border-light);
-    border-radius: 6px;
+    border-radius: 0;
     padding: 12px;
 }
 
@@ -322,7 +332,7 @@ html, body {
     color: #000;
     font-size: 9px;
     padding: 1px 4px;
-    border-radius: 3px;
+    border-radius: 0;
     font-weight: 700;
 }
 
@@ -353,7 +363,7 @@ html, body {
     height: 24px;
     background: var(--bg-panel);
     border: 1px solid var(--border-light);
-    border-radius: 4px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -389,7 +399,7 @@ html, body {
     top: -2px; right: -2px;
     width: 6px; height: 6px;
     background: var(--error);
-    border-radius: 50%;
+    border-radius: 0;
     border: 1px solid var(--bg-card);
 }
 
@@ -398,7 +408,7 @@ html, body {
     bottom: 2px; left: 2px; right: 2px;
     height: 2px;
     background: rgba(0,0,0,0.3);
-    border-radius: 1px;
+    border-radius: 0;
 }
 .load-fill { height: 100%; }
 
@@ -411,7 +421,7 @@ html, body {
     background: var(--bg-panel);
     border: 1px solid var(--border-light);
     color: var(--text-muted);
-    border-radius: 50%;
+    border-radius: 0;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
     z-index: 100;
