@@ -24,19 +24,32 @@ function Core({ cpuId, roles, isIsolated, load }: CoreProps) {
     const primaryRole = roles[0];
     const roleColor = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#1e293b';
     const borderColor = isIsolated ? '#f59e0b' : 'transparent';
+    const roleNames = roles.map(r => ROLES[r]?.name || r).join(', ');
+    const hasMultipleRoles = roles.length > 1;
 
     return (
         <div
             onClick={handleClick}
-            className="core"
+            className={`core ${hasMultipleRoles ? 'multi-role' : ''}`}
             style={{
                 backgroundColor: roleColor,
                 borderColor,
                 cursor: activeTool ? 'pointer' : 'default',
             }}
-            title={`CPU ${cpuId}${roles.length ? `: ${roles.join(', ')}` : ''}${load ? ` (${load.toFixed(1)}%)` : ''}`}
+            title={`CPU ${cpuId}${roleNames ? `: ${roleNames}` : ''}${load ? ` (${load.toFixed(1)}%)` : ''}`}
         >
-            {cpuId}
+            <span className="core-id">{cpuId}</span>
+            {hasMultipleRoles && (
+                <div className="role-dots">
+                    {roles.slice(0, 4).map((r, i) => (
+                        <span
+                            key={i}
+                            className="role-dot"
+                            style={{ backgroundColor: ROLES[r]?.color || '#64748b' }}
+                        />
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

@@ -27,19 +27,10 @@ export function ConfigOutput() {
 
         const instanceName = serverName?.toUpperCase() || 'INSTANCE';
 
-        // Get NUMA of taskset core for membind
+        // Get all NUMAs for membind (always include all NUMAs in multi-NUMA system)
         const trashCpu = physicalRoles['trash']?.[0] || '';
-        let membind = '';
-        if (trashCpu !== '') {
-            const tasksetNuma = coreNumaMap[String(trashCpu)];
-            if (tasksetNuma !== undefined) {
-                membind = String(tasksetNuma);
-            }
-        }
-        if (!membind) {
-            const allNumas = [...new Set(Object.values(coreNumaMap))].sort();
-            membind = allNumas.join(',');
-        }
+        const allNumas = [...new Set(Object.values(coreNumaMap))].sort((a, b) => a - b);
+        const membind = allNumas.join(',');
 
         // Build YAML-style bs_instances config
         let txt = 'bs_instances:\n';
