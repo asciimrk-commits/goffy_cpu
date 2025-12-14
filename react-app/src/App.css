@@ -1,22 +1,25 @@
-/* CSS Variables - Dark Theme */
+/* CSS Variables - Retro Dark Theme (Win95 style) */
 :root {
-  --bg-app: #0f172a;
-  --bg-sidebar: #1e293b;
-  --bg-card: #1e293b;
-  --bg-panel: #334155;
-  --border-light: #334155;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --sidebar-width: 280px;
+  --bg-app: #000020;
+  --bg-sidebar: #000040;
+  --bg-card: #000030;
+  --bg-panel: #001050;
+  --border-light: #0080c0;
+  --border-raised: #00c0c0 #004040 #004040 #00c0c0;
+  --border-sunken: #004040 #00c0c0 #00c0c0 #004040;
+  --text-primary: #00ffff;
+  --text-secondary: #80c0c0;
+  --text-muted: #408080;
+  --accent: #00c0ff;
+  --accent-hover: #00ffff;
+  --success: #00ff00;
+  --warning: #ffff00;
+  --danger: #ff4040;
+  --sidebar-width: 300px;
   --header-height: 56px;
-  --radius: 6px;
-  --font-mono: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  --radius: 0px;
+  --font-mono: 'Courier New', 'Lucida Console', monospace;
+  --font-retro: 'Courier New', 'Fixedsys', monospace;
 }
 
 * {
@@ -26,10 +29,11 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-retro);
   background: var(--bg-app);
   color: var(--text-primary);
   line-height: 1.5;
+  image-rendering: pixelated;
 }
 
 .app {
@@ -188,31 +192,38 @@ body {
 
 .btn {
   padding: 8px 16px;
-  border-radius: var(--radius);
+  border-radius: 0;
   font-size: 12px;
   font-weight: 600;
+  font-family: var(--font-retro);
   cursor: pointer;
-  border: none;
-  transition: all 0.2s;
+  border: 2px outset #00c0c0;
+  transition: none;
+  text-transform: uppercase;
 }
 
 .btn-primary {
-  background: var(--accent);
-  color: white;
+  background: #004080;
+  color: #00ffff;
+  border-color: #00c0c0;
 }
 
 .btn-primary:hover {
-  background: var(--accent-hover);
+  background: #0060a0;
+}
+
+.btn-primary:active {
+  border-style: inset;
 }
 
 .btn-ghost {
-  background: transparent;
+  background: #001040;
   color: var(--text-secondary);
-  border: 1px solid var(--border-light);
+  border: 2px outset #006080;
 }
 
 .btn-ghost:hover {
-  background: var(--bg-panel);
+  background: #002060;
 }
 
 /* Palette */

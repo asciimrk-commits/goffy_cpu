@@ -90,7 +90,7 @@ node 0 size: 32000 MB
                     <div className="logo">
                         <img src="/goffy_cpu/cpu-icon.png" alt="CPU" className="logo-icon" />
                         <div className="logo-text">
-                            <span className="logo-holy">✝ HOLY</span>
+                            <span className="logo-holy">☦ HOLY</span>
                             <span className="logo-main">CPU<span className="logo-accent">MAPPER</span></span>
                         </div>
                     </div>

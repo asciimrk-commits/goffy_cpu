@@ -245,3 +245,141 @@ export function formatCoreRange(cores: number[]): string {
     }
     return ranges.join(',');
 }
+
+// Parse YAML bs_instances config format
+export function parseYamlConfig(text: string): ParseResult | null {
+    const result: ParseResult = {
+        serverName: '',
+        date: '',
+        geometry: {},
+        isolatedCores: [],
+        coreNumaMap: {},
+        l3Groups: {},
+        networkInterfaces: [],
+        netNumaNodes: [],
+        coreLoads: {},
+        instances: { Physical: {} },
+    };
+
+    // Check if it's a YAML config (has bs_instances or standard yaml fields)
+    if (!text.includes('bs_instances') && !text.includes('trash_cpu') && !text.includes('gateways_cpu')) {
+        return null;
+    }
+
+    const lines = text.split('\n');
+    let serverName = '';
+    const allCores: number[] = [];
+
+    // Role mapping from YAML fields to internal roles
+    const roleMap: Record<string, string> = {
+        'trash_cpu': 'trash',
+        'taskset': 'trash',
+        'allrobots_cpu': 'allrobots_th',
+        'remoteformula_cpu': 'remoteformula',
+        'gateways_cpu': 'gateway',
+        'robots_cpu': 'robots',
+        'udpsend_cpu': 'udp',
+        'udpreceive_cpu': 'udp',
+        'clickhouse': 'clickhouse',
+    };
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        // Extract server name from YAML
+        const nameMatch = trimmed.match(/^name:\s*(.+)/);
+        if (nameMatch) {
+            serverName = nameMatch[1].trim();
+            result.serverName = serverName;
+        }
+
+        // Parse isol_cpus
+        const isolMatch = trimmed.match(/^isol_cpus:\s*(.+)/);
+        if (isolMatch) {
+            result.isolatedCores = parseCoreRange(isolMatch[1]);
+        }
+
+        // Parse net_cpus (net0: [42, 43, ...])
+        const netMatch = trimmed.match(/^(net\d+):\s*\[([^\]]+)\]/);
+        if (netMatch) {
+            result.networkInterfaces.push(netMatch[1]);
+            const netCores = netMatch[2].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            netCores.forEach(core => {
+                if (!result.instances.Physical[String(core)]) result.instances.Physical[String(core)] = [];
+                if (!result.instances.Physical[String(core)].includes('net_irq')) {
+                    result.instances.Physical[String(core)].push('net_irq');
+                }
+                allCores.push(core);
+            });
+        }
+
+        // Parse role fields
+        for (const [field, role] of Object.entries(roleMap)) {
+            const regex = new RegExp(`^${field}:\\s*["']?([^"'\\n]+)["']?`);
+            const match = trimmed.match(regex);
+            if (match) {
+                const value = match[1].trim();
+                const cores = parseCoreRange(value);
+                cores.forEach(core => {
+                    if (!result.instances.Physical[String(core)]) result.instances.Physical[String(core)] = [];
+                    if (!result.instances.Physical[String(core)].includes(role)) {
+                        result.instances.Physical[String(core)].push(role);
+                    }
+                    allCores.push(core);
+                });
+            }
+        }
+
+        // Parse CPUAlias entries
+        const aliasMatch = trimmed.match(/CPUAlias\s+Name="([^"]+)"\s+Cores="([^"]+)"/);
+        if (aliasMatch) {
+            const aliasName = aliasMatch[1];
+            const cores = parseCoreRange(aliasMatch[2]);
+
+            let role = 'isolated';
+            if (aliasName.toLowerCase().includes('formula')) role = 'formula';
+            else if (aliasName.toLowerCase().includes('robot')) role = 'robots';
+            else if (aliasName.toLowerCase().includes('isolated')) role = 'isolated';
+
+            cores.forEach(core => {
+                if (!result.instances.Physical[String(core)]) result.instances.Physical[String(core)] = [];
+                if (!result.instances.Physical[String(core)].includes(role)) {
+                    result.instances.Physical[String(core)].push(role);
+                }
+                allCores.push(core);
+            });
+        }
+    }
+
+    // Build geometry from all cores (assume simple layout if not specified)
+    const uniqueCores = [...new Set(allCores)].sort((a, b) => a - b);
+    if (uniqueCores.length === 0) return null;
+
+    const maxCore = Math.max(...uniqueCores);
+    const coresPerSocket = maxCore < 24 ? maxCore + 1 : Math.ceil((maxCore + 1) / 2);
+    const numSockets = Math.ceil((maxCore + 1) / coresPerSocket);
+
+    // Build simple geometry
+    for (let s = 0; s < numSockets; s++) {
+        result.geometry[s] = {};
+        result.geometry[s][s] = {};
+        result.geometry[s][s][s] = [];
+
+        for (let c = s * coresPerSocket; c < Math.min((s + 1) * coresPerSocket, maxCore + 1); c++) {
+            result.geometry[s][s][s].push(c);
+            result.coreNumaMap[String(c)] = s;
+        }
+    }
+
+    // Mark OS cores (non-isolated, no roles)
+    for (let c = 0; c <= maxCore; c++) {
+        const isIsolated = result.isolatedCores.includes(c);
+        const hasRole = result.instances.Physical[String(c)]?.length > 0;
+        if (!hasRole && !isIsolated) {
+            if (!result.instances.Physical[String(c)]) result.instances.Physical[String(c)] = [];
+            result.instances.Physical[String(c)].push('sys_os');
+        }
+    }
+
+    return result;
+}

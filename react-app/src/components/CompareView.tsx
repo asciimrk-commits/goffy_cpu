@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { parseTopology } from '../lib/parser';
+import { parseTopology, parseYamlConfig } from '../lib/parser';
 import { ROLES } from '../types/topology';
 import type { Geometry, InstanceConfig } from '../types/topology';
 import { CoreTooltip } from './Tooltip';
@@ -84,14 +84,14 @@ export function CompareView() {
   const [newServerName, setNewServerName] = useState('');
   const [oldConfig, setOldConfig] = useState<ConfigData | null>(null);
   const [newConfig, setNewConfig] = useState<ConfigData | null>(null);
-  
+
   const oldFileRef = useRef<HTMLInputElement>(null);
   const newFileRef = useRef<HTMLInputElement>(null);
 
   const handleFileLoad = (side: 'old' | 'new') => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
@@ -106,10 +106,15 @@ export function CompareView() {
 
   const handleParse = (side: 'old' | 'new') => {
     const text = side === 'old' ? oldText : newText;
-    const result = parseTopology(text);
-    
+
+    // Try YAML config parser first, fall back to cpu-map.sh parser
+    let result = parseYamlConfig(text);
+    if (!result) {
+      result = parseTopology(text);
+    }
+
     const serverName = result.serverName || `Config ${side.toUpperCase()}`;
-    
+
     const config: ConfigData = {
       serverName,
       geometry: result.geometry,
@@ -147,11 +152,11 @@ export function CompareView() {
                 accept=".txt,.log,.sh,.yaml,.yml"
                 style={{ display: 'none' }}
               />
-              <button 
+              <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => oldFileRef.current?.click()}
               >
-                📁 Load File
+                Load File
               </button>
             </div>
             <textarea
@@ -185,11 +190,11 @@ export function CompareView() {
                 accept=".txt,.log,.sh,.yaml,.yml"
                 style={{ display: 'none' }}
               />
-              <button 
+              <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => newFileRef.current?.click()}
               >
-                📁 Load File
+                Load File
               </button>
             </div>
             <textarea
