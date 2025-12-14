@@ -119,10 +119,12 @@ body {
   border-radius: 8px;
 }
 
-.logo-hft {
+.logo-holy {
   font-size: 10px;
-  color: var(--text-muted);
-  letter-spacing: 0.1em;
+  color: #00ffff;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 2px;
+  text-shadow: 0 0 4px #00ffff;
 }
 
 .logo-main {
