@@ -120,27 +120,34 @@ body {
 .logo-icon {
   width: 36px;
   height: 36px;
-  border-radius: 8px;
+  border-radius: 0;
+  image-rendering: pixelated;
 }
 
 .logo-holy {
   font-size: 10px;
-  color: #00ffff;
+  color: #70c0c0;
   font-family: 'Courier New', monospace;
   letter-spacing: 2px;
-  text-shadow: 0 0 4px #00ffff;
 }
 
 .logo-main {
   font-size: 14px;
   font-weight: 700;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
 }
 
 .logo-accent {
-  background: linear-gradient(90deg, var(--accent), #8b5cf6);
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: #60b0c0;
+}
+
+.logo-cross {
+  font-size: 32px;
+  color: #ffd700;
+  text-shadow: 0 0 8px #ffd700, 0 0 16px #ff8c00;
+  margin-left: 8px;
+  line-height: 1;
 }
 
 .sidebar-content {

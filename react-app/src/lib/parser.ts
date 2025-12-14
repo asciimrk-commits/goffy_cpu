@@ -277,7 +277,7 @@ export function parseYamlConfig(text: string): ParseResult | null {
         'allrobots_cpu': 'allrobots_th',
         'remoteformula_cpu': 'remoteformula',
         'gateways_cpu': 'gateway',
-        'robots_cpu': 'robots',
+        'robots_cpu': 'robot_default',
         'udpsend_cpu': 'udp',
         'udpreceive_cpu': 'udp',
         'clickhouse': 'clickhouse',

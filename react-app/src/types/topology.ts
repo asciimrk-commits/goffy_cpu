@@ -62,9 +62,12 @@ export const ROLES: Record<string, RoleDefinition> = {
     pool2: { id: 'pool2', name: 'Robot Pool 2', group: 'Trading Logic', color: '#6366f1' },
     robot_default: { id: 'robot_default', name: 'Robot Default', group: 'Trading Logic', color: '#2ec4b6' },
     ar: { id: 'ar', name: 'AllRobotsTh', group: 'Trading Logic', color: '#8b5cf6' },
+    allrobots_th: { id: 'allrobots_th', name: 'AllRobotsTh', group: 'Trading Logic', color: '#8b5cf6' },
     rf: { id: 'rf', name: 'RemoteFormula', group: 'Analytics', color: '#d946ef' },
+    remoteformula: { id: 'remoteformula', name: 'RemoteFormula', group: 'Analytics', color: '#d946ef' },
     formula: { id: 'formula', name: 'Formula', group: 'Analytics', color: '#ec4899' },
     click: { id: 'click', name: 'ClickHouse', group: 'Analytics', color: '#14b8a6' },
+    isolated: { id: 'isolated', name: 'Isolated', group: 'Other', color: '#64748b' },
 };
 
 export const BENDER_TO_ROLE: Record<string, string> = {
