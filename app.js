@@ -553,25 +553,139 @@ const HFT = {
     // =========================================================================
     // STATS & OUTPUT
     // =========================================================================
+    // Role ID to BENDER config name mapping
+    roleToBender: {
+        'sys_os': null,  // Отдельно выводится как System cpus
+        'net_irq': null, // Пропускается в основном выводе
+        'udp': 'UdpReceiveCores',
+        'trash': 'TrashCPU',
+        'gateway': 'GatewaysDefault',
+        'isolated_robots': 'IsolatedRobots',
+        'pool1': 'RobotsPool1',
+        'pool2': 'RobotsPool2',
+        'robot_default': 'RobotsDefault',
+        'ar': 'AllRobotsThCPU',
+        'rf': 'RemoteFormulaCPU',
+        'formula': 'Formula',
+        'click': 'ClickHouseCores'
+    },
+    
+    // BENDER name to role ID mapping (for parsing)
+    benderToRole: {
+        'UdpReceiveCores': 'udp',
+        'UdpSendCores': 'udp',
+        'TrashCPU': 'trash',
+        'GatewaysDefault': 'gateway',
+        'Gateways': 'gateway',
+        'IsolatedRobots': 'isolated_robots',
+        'RobotsPool1': 'pool1',
+        'RobotsPool2': 'pool2',
+        'RobotsDefault': 'robot_default',
+        'AllRobotsThCPU': 'ar',
+        'RemoteFormulaCPU': 'rf',
+        'Formula': 'formula',
+        'ClickHouseCores': 'click',
+        'Isolated': 'isolated'
+    },
+    
     updateStats() {
-        let txt = this.state.serverName ? `# ${this.state.serverName}\n` : '';
         const physicalRoles = {};
+        const allCpus = new Set();
+        
         Object.entries(this.state.instances.Physical || {}).forEach(([cpu, tags]) => {
-            tags.forEach(t => { if (!physicalRoles[t]) physicalRoles[t] = []; physicalRoles[t].push(parseInt(cpu)); });
+            allCpus.add(parseInt(cpu));
+            tags.forEach(t => { 
+                if (!physicalRoles[t]) physicalRoles[t] = []; 
+                physicalRoles[t].push(parseInt(cpu)); 
+            });
         });
         
-        txt += '\n### Physical ###\n';
-        Object.entries(HFT_RULES.roles).forEach(([id, role]) => {
-            if (physicalRoles[id]?.length > 0) {
-                txt += `${role.name}: [${physicalRoles[id].sort((a,b) => a-b).join(', ')}]\n`;
+        // Collect system cores (OS)
+        const sysCores = (physicalRoles['sys_os'] || []).sort((a,b) => a-b);
+        
+        // Collect isolated cores
+        const isolatedCores = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a,b) => a-b);
+        
+        // Build BENDER format output
+        let txt = '{';
+        const entries = [];
+        
+        // Add roles in BENDER format
+        Object.entries(this.roleToBender).forEach(([roleId, benderName]) => {
+            if (benderName && physicalRoles[roleId]?.length > 0) {
+                const cores = physicalRoles[roleId].sort((a,b) => a-b);
+                entries.push(`'${benderName}': [${cores.join(', ')}]`);
             }
         });
         
-        if (this.state.isolatedCores.size > 0) {
-            txt += `Isolated: [${[...this.state.isolatedCores].map(c => parseInt(c)).sort((a,b) => a-b).join(', ')}]\n`;
+        // Add Isolated
+        if (isolatedCores.length > 0) {
+            entries.push(`'Isolated': [${isolatedCores.join(', ')}]`);
+        }
+        
+        txt += entries.join(',\n ');
+        txt += '}\n';
+        
+        // Add stats
+        const cpuCount = Object.keys(this.state.coreNumaMap).length;
+        txt += `Cpu count: ${cpuCount}\n`;
+        txt += `System cpus count: ${sysCores.length}\n`;
+        
+        // Format system cpus as range
+        if (sysCores.length > 0) {
+            txt += `System cpus: ${this.formatCoreRange(sysCores)}\n`;
+        }
+        
+        // Find unused isolated cpus (isolated but no role)
+        const usedCores = new Set();
+        Object.values(physicalRoles).forEach(cores => cores.forEach(c => usedCores.add(c)));
+        const unusedIsolated = isolatedCores.filter(c => !usedCores.has(c));
+        if (unusedIsolated.length > 0) {
+            txt += `Unused bender isolated cpus: ${this.formatCoreRange(unusedIsolated)}\n`;
+        }
+        
+        // Add NUMA info
+        const numaRanges = {};
+        Object.entries(this.state.geometry).forEach(([socket, numaData]) => {
+            Object.entries(numaData).forEach(([numa, l3Data]) => {
+                const cores = [];
+                Object.values(l3Data).forEach(l3Cores => cores.push(...l3Cores));
+                numaRanges[numa] = cores.sort((a,b) => a-b);
+            });
+        });
+        
+        Object.keys(numaRanges).sort((a,b) => parseInt(a) - parseInt(b)).forEach(numa => {
+            txt += `node${numa}: ${this.formatCoreRange(numaRanges[numa])}\n`;
+        });
+        
+        // Add NET NUMA info
+        if (this.state.netNumaNodes.size > 0) {
+            txt += '@@BENDER_NET@@\n';
+            [...this.state.netNumaNodes].sort().forEach(numa => {
+                if (numaRanges[numa]) {
+                    txt += `net${numa}: ${this.formatCoreRange(numaRanges[numa])}\n`;
+                }
+            });
         }
         
         document.getElementById('output').textContent = txt;
+    },
+    
+    formatCoreRange(cores) {
+        if (cores.length === 0) return '';
+        const sorted = [...cores].sort((a,b) => a-b);
+        const ranges = [];
+        let start = sorted[0], end = sorted[0];
+        
+        for (let i = 1; i <= sorted.length; i++) {
+            if (i < sorted.length && sorted[i] === end + 1) {
+                end = sorted[i];
+            } else {
+                ranges.push(start === end ? `${start}` : `${start}-${end}`);
+                if (i < sorted.length) { start = sorted[i]; end = sorted[i]; }
+            }
+        }
+        return ranges.join(',');
     },
     
     calculateSizing() {
@@ -701,51 +815,170 @@ const HFT = {
     // =========================================================================
     // COMPARE
     // =========================================================================
-    loadCompareFile(side) {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json';
-        input.onchange = (e) => { if (e.target.files[0]) this.readCompareFile(e.target.files[0], side); };
-        input.click();
+    parseCompareText(side) {
+        const textArea = document.getElementById(`cmp-text-${side}`);
+        const serverInput = document.getElementById(`cmp-server-${side}`);
+        const text = textArea?.value || '';
+        const serverName = serverInput?.value || `Config ${side.toUpperCase()}`;
+        
+        if (!text.trim()) {
+            alert('Paste BENDER config text first');
+            return;
+        }
+        
+        try {
+            const config = this.parseBenderConfig(text, serverName);
+            if (side === 'old') this.compareOld = config;
+            else this.compareNew = config;
+            this.renderComparePanel(side, config);
+            if (this.compareOld && this.compareNew) this.calculateDiff();
+        } catch (err) {
+            alert('Parse error: ' + err.message);
+        }
     },
     
-    readCompareFile(file, side) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const config = JSON.parse(e.target.result);
-                if (side === 'old') this.compareOld = config;
-                else this.compareNew = config;
-                this.renderComparePanel(side, config);
-                if (this.compareOld && this.compareNew) this.calculateDiff();
-            } catch (err) { alert('Error: ' + err.message); }
+    parseBenderConfig(text, serverName) {
+        const config = {
+            serverName: serverName,
+            geometry: {},
+            netNumaNodes: [],
+            isolatedCores: [],
+            instances: { Physical: {} }
         };
-        reader.readAsText(file);
+        
+        const lines = text.split('\n');
+        let cpuCount = 96; // default
+        const numaRanges = {};
+        
+        // Parse each line
+        lines.forEach(line => {
+            line = line.trim();
+            if (!line) return;
+            
+            // Parse 'RoleName': [1, 2, 3] format
+            const roleMatch = line.match(/['"]?(\w+)['"]?\s*:\s*\[([^\]]*)\]/);
+            if (roleMatch) {
+                const benderName = roleMatch[1];
+                const coresStr = roleMatch[2];
+                const cores = this.parseCoreList(coresStr);
+                
+                if (benderName === 'Isolated') {
+                    config.isolatedCores = cores;
+                } else {
+                    // Map BENDER name to role ID
+                    const roleId = this.benderToRole[benderName];
+                    if (roleId && roleId !== 'isolated') {
+                        cores.forEach(cpu => {
+                            if (!config.instances.Physical[cpu]) config.instances.Physical[cpu] = [];
+                            config.instances.Physical[cpu].push(roleId);
+                        });
+                    }
+                }
+                return;
+            }
+            
+            // Parse Cpu count: N
+            const cpuMatch = line.match(/Cpu count:\s*(\d+)/i);
+            if (cpuMatch) {
+                cpuCount = parseInt(cpuMatch[1]);
+                return;
+            }
+            
+            // Parse nodeN: 0-23
+            const nodeMatch = line.match(/node(\d+):\s*(.+)/i);
+            if (nodeMatch) {
+                const numaId = nodeMatch[1];
+                const cores = this.parseCoreRange(nodeMatch[2]);
+                numaRanges[numaId] = cores;
+                return;
+            }
+            
+            // Parse @@BENDER_NET@@
+            if (line.includes('@@BENDER_NET@@')) return;
+            
+            // Parse netN: range
+            const netMatch = line.match(/net(\d+):\s*(.+)/i);
+            if (netMatch) {
+                const numaId = netMatch[1];
+                if (!config.netNumaNodes.includes(numaId)) {
+                    config.netNumaNodes.push(numaId);
+                }
+                return;
+            }
+        });
+        
+        // Build geometry from NUMA ranges
+        // Group NUMAs into sockets (2 NUMA per socket typically)
+        const numaIds = Object.keys(numaRanges).sort((a, b) => parseInt(a) - parseInt(b));
+        
+        if (numaIds.length > 0) {
+            numaIds.forEach((numaId, idx) => {
+                const socketId = Math.floor(idx / 2); // 2 NUMA per socket
+                if (!config.geometry[socketId]) config.geometry[socketId] = {};
+                config.geometry[socketId][numaId] = {
+                    '0': numaRanges[numaId] // Single L3 cache group
+                };
+            });
+        } else {
+            // No NUMA info - create single socket/numa with all cores
+            const allCores = [];
+            for (let i = 0; i < cpuCount; i++) allCores.push(i);
+            config.geometry['0'] = { '0': { '0': allCores } };
+        }
+        
+        return config;
+    },
+    
+    parseCoreList(str) {
+        // Parse "1, 2, 3" or "1,2,3" or multiline
+        const cores = [];
+        const cleaned = str.replace(/\s+/g, ' ').trim();
+        if (!cleaned) return cores;
+        
+        cleaned.split(/[,\s]+/).forEach(part => {
+            const num = parseInt(part);
+            if (!isNaN(num)) cores.push(num);
+        });
+        return cores;
+    },
+    
+    parseCoreRange(str) {
+        // Parse "0-23" or "0-4,94-95" 
+        const cores = [];
+        str.split(',').forEach(part => {
+            part = part.trim();
+            if (part.includes('-')) {
+                const [start, end] = part.split('-').map(s => parseInt(s.trim()));
+                if (!isNaN(start) && !isNaN(end)) {
+                    for (let i = start; i <= end; i++) cores.push(i);
+                }
+            } else {
+                const num = parseInt(part);
+                if (!isNaN(num)) cores.push(num);
+            }
+        });
+        return cores;
     },
     
     clearCompare(side) {
         if (side === 'old') this.compareOld = null;
         else this.compareNew = null;
         
-        document.getElementById(`compare-${side}`).innerHTML = `
-            <div class="cmp-empty" onclick="HFT.loadCompareFile('${side}')">
-                <div class="cmp-empty-icon">◈</div>
-                <div>Drop JSON or click to load</div>
-            </div>`;
-        document.getElementById(`cmp-server-${side}`).textContent = 'No config loaded';
+        document.getElementById(`compare-${side}`).innerHTML = '';
+        document.getElementById(`cmp-text-${side}`).value = '';
+        document.getElementById(`cmp-server-${side}`).value = '';
         ['added', 'removed', 'changed'].forEach(k => document.getElementById(`diff-${k}`).textContent = '0');
     },
     
     renderComparePanel(side, config) {
         const container = document.getElementById(`compare-${side}`);
-        const serverLabel = document.getElementById(`cmp-server-${side}`);
         const geom = config.geometry || {};
-        const netNumas = new Set(config.netNumaNodes || []);
-        const isolatedCores = new Set(config.isolatedCores || []);
+        const netNumas = new Set((config.netNumaNodes || []).map(String));
+        const isolatedCores = new Set((config.isolatedCores || []).map(String));
         const insts = config.instances || {};
         
-        // Update server name
-        if (serverLabel) serverLabel.textContent = config.serverName || 'Unknown';
+        // Collect all used roles for legend
+        const usedRoles = new Set();
         
         let html = '<div class="cmp-blueprint">';
         
@@ -755,7 +988,7 @@ const HFT = {
                 <div class="cmp-socket-body">`;
             
             Object.keys(geom[socketId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
-                const isNet = netNumas.has(numaId);
+                const isNet = netNumas.has(String(numaId));
                 html += `<div class="cmp-numa ${isNet ? 'is-net' : ''}">
                     <div class="cmp-numa-hdr">
                         <span>NUMA ${numaId}</span>
@@ -765,23 +998,36 @@ const HFT = {
                 
                 Object.keys(geom[socketId][numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
                     geom[socketId][numaId][l3Id].forEach(cpu => {
+                        const cpuStr = String(cpu);
                         const tags = [];
+                        
+                        // Collect tags from all instances
                         Object.keys(insts).forEach(inst => {
-                            if (insts[inst][cpu]) tags.push(...insts[inst][cpu]);
+                            const cpuTags = insts[inst][cpuStr] || insts[inst][cpu];
+                            if (cpuTags) {
+                                if (Array.isArray(cpuTags)) tags.push(...cpuTags);
+                                else if (cpuTags instanceof Set) tags.push(...cpuTags);
+                            }
                         });
+                        
                         const fillTags = tags.filter(t => t !== 'isolated');
-                        const isIsolated = isolatedCores.has(cpu) || tags.includes('isolated');
+                        const isIsolated = isolatedCores.has(cpuStr) || tags.includes('isolated');
                         
                         let bg = '';
                         let hasRole = false;
                         if (fillTags.length > 0) {
-                            const role = HFT_RULES.roles[fillTags[0]];
-                            if (role) { bg = `background:${role.color};`; hasRole = true; }
+                            const roleId = fillTags[0];
+                            const role = HFT_RULES.roles[roleId];
+                            if (role) { 
+                                bg = `background:${role.color};`; 
+                                hasRole = true;
+                                usedRoles.add(roleId);
+                            }
                         }
                         
                         html += `<div class="cmp-core ${hasRole ? 'has-role' : ''} ${isIsolated ? 'is-isolated' : ''}" 
-                            data-cpu="${cpu}" data-side="${side}" style="${bg}"
-                            onmouseenter="HFT.showCompareTooltip(event,'${side}','${cpu}')"
+                            data-cpu="${cpuStr}" data-side="${side}" style="${bg}"
+                            onmouseenter="HFT.showCompareTooltip(event,'${side}','${cpuStr}')"
                             onmousemove="HFT.moveTooltip(event)"
                             onmouseleave="HFT.hideTooltip()">${cpu}</div>`;
                     });
@@ -792,19 +1038,53 @@ const HFT = {
         });
         
         html += '</div>';
+        
+        // Add legend if there are roles
+        if (usedRoles.size > 0) {
+            html += '<div class="cmp-legend">';
+            usedRoles.forEach(roleId => {
+                const role = HFT_RULES.roles[roleId];
+                if (role) {
+                    html += `<div class="cmp-legend-item">
+                        <div class="cmp-legend-color" style="background:${role.color}"></div>
+                        <span>${role.name}</span>
+                    </div>`;
+                }
+            });
+            html += '</div>';
+        }
+        
         container.innerHTML = html;
     },
     
     showCompareTooltip(event, side, cpu) {
         const config = side === 'old' ? this.compareOld : this.compareNew;
         if (!config) return;
+        
+        const cpuStr = String(cpu);
         const allTags = new Set();
+        
         if (config.instances) {
             Object.keys(config.instances).forEach(inst => {
-                if (config.instances[inst][cpu]) config.instances[inst][cpu].forEach(t => allTags.add(t));
+                const cpuTags = config.instances[inst][cpuStr] || config.instances[inst][cpu];
+                if (cpuTags) {
+                    if (Array.isArray(cpuTags)) {
+                        cpuTags.forEach(t => allTags.add(t));
+                    } else if (cpuTags instanceof Set) {
+                        cpuTags.forEach(t => allTags.add(t));
+                    }
+                }
             });
         }
+        
+        // Check isolated
+        const isolatedCores = new Set((config.isolatedCores || []).map(String));
+        const isIsolated = isolatedCores.has(cpuStr);
+        
         let html = `<div class="tooltip-header">Core ${cpu} (${side.toUpperCase()})</div>`;
+        if (isIsolated) {
+            html += '<div style="font-size:10px;color:var(--accent);margin-bottom:4px;">⬡ Isolated</div>';
+        }
         if (allTags.size > 0) {
             html += '<div class="tooltip-roles">';
             allTags.forEach(tid => {
@@ -812,7 +1092,9 @@ const HFT = {
                 if (role) html += `<div class="tooltip-role"><div class="tooltip-swatch" style="background:${role.color}"></div>${role.name}</div>`;
             });
             html += '</div>';
-        } else html += '<div style="color:var(--text-muted)">No roles</div>';
+        } else if (!isIsolated) {
+            html += '<div style="color:var(--text-muted)">No roles</div>';
+        }
         
         const tooltip = document.getElementById('tooltip');
         tooltip.innerHTML = html;
@@ -822,11 +1104,20 @@ const HFT = {
     
     calculateDiff() {
         if (!this.compareOld || !this.compareNew) return;
+        
         const getTags = (cfg, cpu) => {
+            const cpuStr = String(cpu);
             const t = new Set();
             if (cfg.instances) {
                 Object.keys(cfg.instances).forEach(inst => {
-                    if (cfg.instances[inst][cpu]) cfg.instances[inst][cpu].forEach(x => t.add(x));
+                    const cpuTags = cfg.instances[inst][cpuStr] || cfg.instances[inst][cpu];
+                    if (cpuTags) {
+                        if (Array.isArray(cpuTags)) {
+                            cpuTags.forEach(x => t.add(x));
+                        } else if (cpuTags instanceof Set) {
+                            cpuTags.forEach(x => t.add(x));
+                        }
+                    }
                 });
             }
             return t;
