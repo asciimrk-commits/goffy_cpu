@@ -81,7 +81,7 @@ export function AutoOptimize() {
         const assignedOsCores = osCores.slice(0, osNeeded);
         assignedOsCores.forEach(c => assignRole(c, 'sys_os'));
         recs.push({
-            title: '🖥️ OS',
+            title: '[OS]',
             cores: assignedOsCores,
             description: `${assignedOsCores.length} ядер`,
             role: 'sys_os',
@@ -131,7 +131,7 @@ export function AutoOptimize() {
             assignRole(trashCore, 'rf');
             assignRole(trashCore, 'click');
             recs.push({
-                title: '🗑️ Trash+RF+Click',
+                title: '[TRASH+RF+CLICK]',
                 cores: [trashCore],
                 description: `Ядро ${trashCore}`,
                 role: 'trash',
@@ -145,7 +145,7 @@ export function AutoOptimize() {
             if (udpCore !== null) {
                 assignRole(udpCore, 'udp');
                 recs.push({
-                    title: '📡 UDP',
+                    title: '[UDP]',
                     cores: [udpCore],
                     description: `Ядро ${udpCore}`,
                     role: 'udp',
@@ -160,7 +160,7 @@ export function AutoOptimize() {
             assignRole(arCore, 'ar');
             assignRole(arCore, 'formula');
             recs.push({
-                title: '🔄 AR+Formula',
+                title: '[AR+FORMULA]',
                 cores: [arCore],
                 description: `Ядро ${arCore}`,
                 role: 'ar',
@@ -195,7 +195,7 @@ export function AutoOptimize() {
         }
         if (irqCores.length > 0) {
             recs.push({
-                title: '⚡ IRQ',
+                title: '[IRQ]',
                 cores: irqCores,
                 description: `${irqCores.length} ядер`,
                 role: 'net_irq',
@@ -219,7 +219,7 @@ export function AutoOptimize() {
         }
         if (gwCores.length > 0) {
             recs.push({
-                title: '🚪 Gateways',
+                title: '[GATEWAYS]',
                 cores: gwCores,
                 description: `${gwCores.length} ядер`,
                 role: 'gateway',
@@ -239,7 +239,7 @@ export function AutoOptimize() {
         if (isoRobots.length >= MIN_ISO) {
             isoRobots.forEach(c => assignRole(c, 'isolated_robots'));
             recs.push({
-                title: '💎 Isolated Robots',
+                title: '[ISO ROBOTS]',
                 cores: isoRobots,
                 description: `${isoRobots.length} ядер`,
                 role: 'isolated_robots',
@@ -273,7 +273,7 @@ export function AutoOptimize() {
 
             if (pool1.length > 0) {
                 recs.push({
-                    title: '🤖 Pool 1',
+                    title: '[POOL 1]',
                     cores: pool1,
                     description: `NUMA ${otherNumas[0]}: ${pool1.length}`,
                     role: 'pool1',
@@ -292,7 +292,7 @@ export function AutoOptimize() {
 
             if (pool2.length > 0) {
                 recs.push({
-                    title: '🤖 Pool 2',
+                    title: '[POOL 2]',
                     cores: pool2,
                     description: `NUMA ${otherNumas[1]}: ${pool2.length}`,
                     role: 'pool2',
@@ -313,7 +313,7 @@ export function AutoOptimize() {
         });
         if (defCores.length > 0) {
             recs.push({
-                title: '🤖 Default Robots',
+                title: '[DEFAULT]',
                 cores: defCores,
                 description: `${defCores.length} ядер`,
                 role: 'robot_default',
@@ -352,17 +352,17 @@ export function AutoOptimize() {
     return (
         <div className="optimize-container">
             <div className="optimize-header">
-                <h2>⚡ Auto-Optimization Engine</h2>
+                <h2>[AUTO-OPTIMIZATION ENGINE]</h2>
                 <p>Generate optimized configuration based on BenderServer best practices</p>
             </div>
 
             <div className="optimize-actions">
                 <button className="btn btn-primary btn-lg" onClick={generateOptimization}>
-                    🔄 Generate Optimization
+                    GENERATE
                 </button>
                 {recommendations.length > 0 && (
                     <button className="btn btn-secondary" onClick={applyRecommendations}>
-                        ✅ Apply to Map
+                        APPLY
                     </button>
                 )}
             </div>
@@ -380,7 +380,7 @@ export function AutoOptimize() {
                             <h4>{rec.title}</h4>
                             <p>{rec.description}</p>
                             {rec.rationale && <p className="rationale">{rec.rationale}</p>}
-                            {rec.warning && <p className="warning-text">⚠️ {rec.warning}</p>}
+                            {rec.warning && <p className="warning-text">[!] {rec.warning}</p>}
                             <div className="recommend-cores">
                                 {rec.cores.map(c => (
                                     <span

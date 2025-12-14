@@ -21,19 +21,19 @@ function App() {
               className={`tab ${activeTab === 'mapper' ? 'active' : ''}`}
               onClick={() => setActiveTab('mapper')}
             >
-              🗺️ CPU Mapper
+              [MAPPER]
             </button>
             <button
               className={`tab ${activeTab === 'compare' ? 'active' : ''}`}
               onClick={() => setActiveTab('compare')}
             >
-              📊 Compare
+              [COMPARE]
             </button>
             <button
               className={`tab ${activeTab === 'optimize' ? 'active' : ''}`}
               onClick={() => setActiveTab('optimize')}
             >
-              ⚡ Auto-Optimize
+              [AUTO-OPT]
             </button>
           </div>
 

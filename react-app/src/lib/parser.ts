@@ -371,13 +371,20 @@ export function parseYamlConfig(text: string): ParseResult | null {
         }
     }
 
-    // Mark OS cores (non-isolated, no roles)
+    // IMPORTANT: Respect isol_cpus - non-isolated cores are ALWAYS sys_os
+    // Remove roles from non-isolated cores and mark as OS
     for (let c = 0; c <= maxCore; c++) {
         const isIsolated = result.isolatedCores.includes(c);
-        const hasRole = result.instances.Physical[String(c)]?.length > 0;
-        if (!hasRole && !isIsolated) {
-            if (!result.instances.Physical[String(c)]) result.instances.Physical[String(c)] = [];
-            result.instances.Physical[String(c)].push('sys_os');
+
+        if (!isIsolated) {
+            // Non-isolated core = OS core, remove any other roles
+            result.instances.Physical[String(c)] = ['sys_os'];
+        } else {
+            // Isolated core with no explicit role = generic isolated
+            const hasRole = result.instances.Physical[String(c)]?.length > 0;
+            if (!hasRole) {
+                result.instances.Physical[String(c)] = ['isolated'];
+            }
         }
     }
 

@@ -1,20 +1,20 @@
-/* CSS Variables - Retro Dark Theme (Win95 style) */
+/* CSS Variables - Retro Dark Theme (Win95 style - softer) */
 :root {
-  --bg-app: #000020;
-  --bg-sidebar: #000040;
-  --bg-card: #000030;
-  --bg-panel: #001050;
-  --border-light: #0080c0;
-  --border-raised: #00c0c0 #004040 #004040 #00c0c0;
-  --border-sunken: #004040 #00c0c0 #00c0c0 #004040;
-  --text-primary: #00ffff;
-  --text-secondary: #80c0c0;
-  --text-muted: #408080;
-  --accent: #00c0ff;
-  --accent-hover: #00ffff;
-  --success: #00ff00;
-  --warning: #ffff00;
-  --danger: #ff4040;
+  --bg-app: #0a0a1a;
+  --bg-sidebar: #101025;
+  --bg-card: #0d0d20;
+  --bg-panel: #151530;
+  --border-light: #2a4a6a;
+  --border-raised: #4a8090 #1a3040 #1a3040 #4a8090;
+  --border-sunken: #1a3040 #4a8090 #4a8090 #1a3040;
+  --text-primary: #70c0c0;
+  --text-secondary: #509090;
+  --text-muted: #305050;
+  --accent: #4090a0;
+  --accent-hover: #60b0c0;
+  --success: #40a040;
+  --warning: #a0a040;
+  --danger: #a04040;
   --sidebar-width: 300px;
   --header-height: 56px;
   --radius: 0px;
