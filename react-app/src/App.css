@@ -401,3 +401,260 @@ body {
   color: var(--text-muted);
   font-size: 16px;
 }
+
+/* Mapper Layout */
+.mapper-layout {
+  display: grid;
+  grid-template-columns: 1fr 350px;
+  gap: 20px;
+  height: 100%;
+}
+
+.mapper-main {
+  overflow: auto;
+}
+
+.mapper-sidebar {
+  overflow: auto;
+}
+
+/* Config Output */
+.config-output {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.config-output.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.config-header h4 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 11px;
+}
+
+.config-content {
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 500px;
+  color: var(--text-secondary);
+}
+
+/* Compare View */
+.compare-view {
+  height: 100%;
+}
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  height: 100%;
+}
+
+.compare-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.compare-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input-server {
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.compare-textarea {
+  height: 120px;
+  padding: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  resize: vertical;
+}
+
+.compare-panel {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.compare-panel.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.compare-panel h4 {
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.cmp-socket {
+  margin-bottom: 16px;
+}
+
+.cmp-socket-header {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.cmp-numa {
+  margin-bottom: 8px;
+}
+
+.cmp-numa-header {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.cmp-cores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.cmp-core {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: white;
+  border: 2px solid transparent;
+}
+
+/* Auto Optimize */
+.optimize-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.optimize-header {
+  text-align: center;
+}
+
+.optimize-header h2 {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.optimize-header p {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.optimize-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.btn-lg {
+  padding: 12px 24px;
+  font-size: 14px;
+}
+
+.btn-secondary {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+}
+
+.btn-secondary:hover {
+  background: #475569;
+}
+
+.optimize-result {
+  text-align: center;
+  padding: 16px;
+  background: var(--bg-card);
+  border-radius: 8px;
+}
+
+.optimize-recommendations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.recommend-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.recommend-card h4 {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.recommend-card p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.recommend-cores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.recommend-core {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: white;
+}

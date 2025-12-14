@@ -1,5 +1,8 @@
 import { Sidebar } from './components/Sidebar';
 import { TopologyMap } from './components/TopologyMap';
+import { ConfigOutput } from './components/ConfigOutput';
+import { CompareView } from './components/CompareView';
+import { AutoOptimize } from './components/AutoOptimize';
 import { useAppStore } from './store/appStore';
 import './App.css';
 
@@ -44,13 +47,18 @@ function App() {
 
         {/* Content */}
         <div className="content">
-          {activeTab === 'mapper' && <TopologyMap />}
-          {activeTab === 'compare' && (
-            <div className="placeholder">Compare feature coming soon...</div>
+          {activeTab === 'mapper' && (
+            <div className="mapper-layout">
+              <div className="mapper-main">
+                <TopologyMap />
+              </div>
+              <div className="mapper-sidebar">
+                <ConfigOutput />
+              </div>
+            </div>
           )}
-          {activeTab === 'optimize' && (
-            <div className="placeholder">Auto-Optimize feature coming soon...</div>
-          )}
+          {activeTab === 'compare' && <CompareView />}
+          {activeTab === 'optimize' && <AutoOptimize />}
         </div>
       </main>
     </div>
