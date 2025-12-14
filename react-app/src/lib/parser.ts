@@ -351,15 +351,26 @@ export function parseYamlConfig(text: string): ParseResult | null {
         }
     }
 
-    // Build geometry from all cores (assume simple layout if not specified)
-    const uniqueCores = [...new Set(allCores)].sort((a, b) => a - b);
-    if (uniqueCores.length === 0) return null;
+    // Parse irqaffinity_cpus to get OS cores (adds to total core count)
+    let irqAffinityCores: number[] = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        const irqMatch = trimmed.match(/^irqaffinity_cpus:\s*(.+)/);
+        if (irqMatch) {
+            irqAffinityCores = parseCoreRange(irqMatch[1]);
+            break;
+        }
+    }
 
-    const maxCore = Math.max(...uniqueCores);
-    const coresPerSocket = maxCore < 24 ? maxCore + 1 : Math.ceil((maxCore + 1) / 2);
+    // Find max core from all sources
+    const allKnownCores = [...allCores, ...result.isolatedCores, ...irqAffinityCores];
+    if (allKnownCores.length === 0) return null;
+
+    const maxCore = Math.max(...allKnownCores);
+    const coresPerSocket = maxCore < 48 ? maxCore + 1 : Math.ceil((maxCore + 1) / 2);
     const numSockets = Math.ceil((maxCore + 1) / coresPerSocket);
 
-    // Build simple geometry
+    // Build simple geometry - include ALL cores from 0 to maxCore
     for (let s = 0; s < numSockets; s++) {
         result.geometry[s] = {};
         result.geometry[s][s] = {};
@@ -380,7 +391,7 @@ export function parseYamlConfig(text: string): ParseResult | null {
             // Non-isolated core = OS core, remove any other roles
             result.instances.Physical[String(c)] = ['sys_os'];
         } else {
-            // Isolated core with no explicit role = generic isolated
+            // Isolated core - keep its roles, or mark as generic isolated if no roles
             const hasRole = result.instances.Physical[String(c)]?.length > 0;
             if (!hasRole) {
                 result.instances.Physical[String(c)] = ['isolated'];

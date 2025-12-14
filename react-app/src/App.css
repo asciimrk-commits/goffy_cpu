@@ -1,4 +1,4 @@
-/* CSS Variables - Dark Win98 Theme (muted gray/blue) */
+/* CSS Variables - Dark Win98 Theme (pixelated retro) */
 :root {
   --bg-app: #1a1a2e;
   --bg-sidebar: #16213e;
@@ -20,7 +20,7 @@
   --header-height: 56px;
   --radius: 0px;
   --font-mono: 'Courier New', 'Lucida Console', monospace;
-  --font-retro: 'Tahoma', 'Arial', sans-serif;
+  --font-retro: 'Courier New', 'Fixedsys', monospace;
 }
 
 * {
@@ -33,8 +33,11 @@ body {
   font-family: var(--font-retro);
   background: var(--bg-app);
   color: var(--text-primary);
-  line-height: 1.5;
+  line-height: 1.4;
   font-size: 12px;
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
 }
 
 .app {
