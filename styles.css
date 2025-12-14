@@ -104,10 +104,53 @@ body {
     color: var(--text-primary);
 }
 
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logo-icon-bg {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, var(--accent), #6366f1);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .logo-icon {
-    color: var(--accent);
-    margin-right: 8px;
-    font-size: 18px;
+    color: white;
+    font-size: 16px;
+}
+
+.logo-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.logo-hft {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.15em;
+}
+
+.logo-cpu {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.logo-mapper {
+    font-size: 15px;
+    font-weight: 700;
+    background: linear-gradient(90deg, var(--accent), #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .sidebar-content {
