@@ -1690,8 +1690,228 @@ net0: 0-31
                 reader.readAsText(file);
             }
         });
+    },
+
+    // =========================================================================
+    // PHASE 2: Command Generation
+    // =========================================================================
+
+    generateCommands() {
+        const commands = {
+            kernel: this.generateKernelParams(),
+            taskset: this.generateTasksetCommands(),
+            numactl: this.generateNumactlCommands(),
+            irqbalance: this.generateIrqbalanceBan(),
+            script: ''
+        };
+
+        // Generate full shell script
+        commands.script = this.generateShellScript(commands);
+        return commands;
+    },
+
+    generateKernelParams() {
+        const isolated = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a, b) => a - b);
+        if (isolated.length === 0) return '';
+
+        const range = this.formatCoreRange(isolated);
+        return `isolcpus=${range} nohz_full=${range} rcu_nocbs=${range}`;
+    },
+
+    generateTasksetCommands() {
+        const commands = [];
+        const physicalRoles = {};
+
+        Object.entries(this.state.instances.Physical || {}).forEach(([cpu, tags]) => {
+            tags.forEach(t => {
+                if (!physicalRoles[t]) physicalRoles[t] = [];
+                physicalRoles[t].push(parseInt(cpu));
+            });
+        });
+
+        const roleNames = {
+            'sys_os': 'OS processes',
+            'net_irq': 'IRQ handlers',
+            'udp': 'UDP handler',
+            'trash': 'Trash/RF/Click',
+            'gateway': 'Gateways',
+            'isolated_robots': 'Isolated Robots',
+            'pool1': 'Robot Pool 1',
+            'pool2': 'Robot Pool 2',
+            'robot_default': 'Default Robots',
+            'ar': 'AllRobotsTh',
+            'rf': 'RemoteFormula',
+            'formula': 'Formula',
+            'click': 'ClickHouse'
+        };
+
+        Object.entries(physicalRoles).forEach(([role, cores]) => {
+            if (role === 'isolated') return;
+            const sorted = cores.sort((a, b) => a - b);
+            const name = roleNames[role] || role;
+            const mask = this.coresToMask(sorted);
+            commands.push({
+                role: name,
+                cores: this.formatCoreRange(sorted),
+                mask,
+                cmd: `taskset -p ${mask} $PID  # ${name}`
+            });
+        });
+
+        return commands;
+    },
+
+    generateNumactlCommands() {
+        const commands = [];
+        const numaRoles = {};
+
+        // Group cores by NUMA
+        Object.entries(this.state.instances.Physical || {}).forEach(([cpu, tags]) => {
+            const numa = this.state.coreNumaMap.get(cpu) || this.state.coreNumaMap.get(parseInt(cpu));
+            if (numa === undefined) return;
+
+            tags.forEach(role => {
+                if (role === 'isolated') return;
+                const key = `${role}_${numa}`;
+                if (!numaRoles[key]) numaRoles[key] = { role, numa, cores: [] };
+                numaRoles[key].cores.push(parseInt(cpu));
+            });
+        });
+
+        Object.values(numaRoles).forEach(({ role, numa, cores }) => {
+            const sorted = cores.sort((a, b) => a - b);
+            commands.push({
+                role,
+                numa,
+                cores: this.formatCoreRange(sorted),
+                cmd: `numactl --cpunodebind=${numa} --membind=${numa} ./app  # ${role}`
+            });
+        });
+
+        return commands;
+    },
+
+    generateIrqbalanceBan() {
+        const isolated = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a, b) => a - b);
+        if (isolated.length === 0) return '';
+
+        const mask = this.coresToMask(isolated);
+        return `IRQBALANCE_BANNED_CPUS="${mask}"`;
+    },
+
+    coresToMask(cores) {
+        // Generate hex CPU mask
+        let mask = BigInt(0);
+        cores.forEach(c => {
+            mask |= BigInt(1) << BigInt(c);
+        });
+        return '0x' + mask.toString(16).toUpperCase();
+    },
+
+    generateShellScript(commands) {
+        let script = `#!/bin/bash
+# HFT CPU Mapper - Generated Configuration Script
+# Server: ${this.state.serverName || 'unknown'}
+# Generated: ${new Date().toISOString()}
+
+# ==============================================================================
+# KERNEL PARAMETERS (add to GRUB_CMDLINE_LINUX in /etc/default/grub)
+# ==============================================================================
+# ${commands.kernel}
+
+# ==============================================================================
+# IRQBALANCE CONFIGURATION (/etc/sysconfig/irqbalance or /etc/default/irqbalance)
+# ==============================================================================
+${commands.irqbalance}
+
+# ==============================================================================
+# TASKSET EXAMPLES (bind processes to specific CPUs)
+# ==============================================================================
+`;
+        commands.taskset.forEach(t => {
+            script += `# ${t.role}: cores ${t.cores}\n`;
+            script += `# ${t.cmd}\n\n`;
+        });
+
+        script += `
+# ==============================================================================
+# NUMACTL EXAMPLES (NUMA-aware process binding)
+# ==============================================================================
+`;
+        commands.numactl.forEach(n => {
+            script += `# ${n.role} on NUMA ${n.numa}: cores ${n.cores}\n`;
+            script += `# ${n.cmd}\n\n`;
+        });
+
+        return script;
+    },
+
+    showCommands() {
+        const commands = this.generateCommands();
+
+        let html = '<div class="commands-panel">';
+        html += '<h3>📋 Kernel Parameters</h3>';
+        html += `<div class="cmd-block" onclick="HFT.copyCommand(this)">
+            <code>${commands.kernel || 'No isolated cores configured'}</code>
+            <span class="copy-hint">Click to copy</span>
+        </div>`;
+
+        html += '<h3>🔒 IRQBalance Ban</h3>';
+        html += `<div class="cmd-block" onclick="HFT.copyCommand(this)">
+            <code>${commands.irqbalance || 'No isolated cores'}</code>
+            <span class="copy-hint">Click to copy</span>
+        </div>`;
+
+        html += '<h3>⚙️ Taskset Commands</h3>';
+        commands.taskset.forEach(t => {
+            html += `<div class="cmd-block" onclick="HFT.copyCommand(this)">
+                <div class="cmd-label">${t.role} (${t.cores})</div>
+                <code>${t.cmd}</code>
+                <span class="copy-hint">Click to copy</span>
+            </div>`;
+        });
+
+        html += '<h3>📦 Full Shell Script</h3>';
+        html += `<button class="btn btn-primary" onclick="HFT.downloadScript()">Download Script</button>`;
+
+        html += '</div>';
+
+        // Show in modal or panel
+        const modal = document.createElement('div');
+        modal.className = 'commands-modal';
+        modal.innerHTML = `
+            <div class="commands-modal-content">
+                <div class="commands-modal-header">
+                    <h2>Generated Commands</h2>
+                    <button class="btn btn-ghost" onclick="this.closest('.commands-modal').remove()">✕</button>
+                </div>
+                <div class="commands-modal-body">${html}</div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    },
+
+    copyCommand(el) {
+        const code = el.querySelector('code');
+        if (code) {
+            navigator.clipboard.writeText(code.textContent);
+            el.classList.add('copied');
+            setTimeout(() => el.classList.remove('copied'), 1500);
+        }
+    },
+
+    downloadScript() {
+        const commands = this.generateCommands();
+        const blob = new Blob([commands.script], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cpu-config-${this.state.serverName || 'server'}.sh`;
+        a.click();
+        URL.revokeObjectURL(url);
     }
 };
 
 document.addEventListener('DOMContentLoaded', () => HFT.init());
+
 

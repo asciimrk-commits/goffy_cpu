@@ -1148,3 +1148,114 @@ body {
 .pwa-install-btn:hover {
     background: var(--accent-hover);
 }
+
+/* Phase 2: Commands Modal */
+.commands-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.commands-modal-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    max-width: 800px;
+    width: 100%;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.commands-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.commands-modal-header h2 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.commands-modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.commands-panel h3 {
+    font-size: 14px;
+    color: var(--text-primary);
+    margin: 16px 0 8px;
+}
+
+.commands-panel h3:first-child {
+    margin-top: 0;
+}
+
+.cmd-block {
+    background: var(--bg-app);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.cmd-block:hover {
+    border-color: var(--accent);
+}
+
+.cmd-block.copied {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.cmd-block code {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.cmd-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.copy-hint {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.cmd-block:hover .copy-hint {
+    opacity: 1;
+}
+
+.cmd-block.copied .copy-hint {
+    opacity: 1;
+    color: var(--success);
+}
+
+.cmd-block.copied .copy-hint::after {
+    content: ' ✓';
+}
