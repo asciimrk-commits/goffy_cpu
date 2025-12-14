@@ -964,7 +964,16 @@ const HFT = {
                         while ((match = rolePattern.exec(trimmed)) !== null) {
                             const benderName = match[1];
                             // Skip non-role fields
-                            if (['cpu_id', 'isolated', 'net_cpu'].includes(benderName)) continue;
+                            if (['cpu_id', 'isolated'].includes(benderName)) continue;
+
+                            // Handle net_cpu as net_irq
+                            if (benderName === 'net_cpu') {
+                                if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                                if (!config.instances.Physical[cpuStr].includes('net_irq')) {
+                                    config.instances.Physical[cpuStr].push('net_irq');
+                                }
+                                continue;
+                            }
 
                             const roleId = this.benderToRole[benderName];
                             if (roleId) {
@@ -1006,6 +1015,22 @@ const HFT = {
                                     config.instances.Physical[cpuStr].push(roleId);
                                 }
                             });
+                        }
+                    }
+                }
+
+                // Infer OS cores (cpu_id present but no roles and not isolated)
+                // This requires us to have tracked which CPUs were mentioned
+                // But in this pass we process line by line.
+                // We need to check for simple {cpu_id:X} lines that have no other roles.
+                // Re-scanning the line for this specific case.
+                if (trimmed.startsWith('{') && trimmed.includes('cpu_id') && !trimmed.includes('isolated') && !trimmed.includes('[')) {
+                    const cpuMatch = trimmed.match(/['"]?cpu_id['"]?\s*:\s*(\d+)/);
+                    if (cpuMatch) {
+                        const cpuStr = String(cpuMatch[1]);
+                        if (!config.instances.Physical[cpuStr] || config.instances.Physical[cpuStr].length === 0) {
+                             if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                             config.instances.Physical[cpuStr].push('sys_os');
                         }
                     }
                 }

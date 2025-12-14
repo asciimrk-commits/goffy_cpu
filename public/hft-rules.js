@@ -138,12 +138,31 @@ const HFT_RULES = {
         let serviceL3 = null;
         for (const l3 of netL3Keys) { if (netL3Pools[l3].some(c => assignedOsCores.includes(c))) { serviceL3 = l3; break; } }
         if (!serviceL3 && netL3Keys.length > 0) serviceL3 = netL3Keys[0];
-        const workL3Keys = netL3Keys.filter(k => k !== serviceL3);
+
+        // If we only have 1 L3 pool, everything shares it.
+        // Otherwise, IRQ/GW use non-service pools.
+        let workL3Keys = netL3Keys.filter(k => k !== serviceL3);
+        if (workL3Keys.length === 0 && netL3Keys.length > 0) {
+            workL3Keys = [serviceL3]; // Fallback for single L3 systems
+        }
 
         recommendations.push({ title: '🖥️ OS', cores: assignedOsCores, description: `${assignedOsCores.length} ядер`, rationale: `~${osLoad.toFixed(0)}%` });
 
         // Service cores
-        const servicePool = (netL3Pools[serviceL3] || []).filter(c => isolatedCores.includes(c) && !isAssigned(c)).sort((a, b) => parseInt(a) - parseInt(b));
+        // Strive to flush one L3 pool (serviceL3), but if impossible move to adjacent (workL3Keys)
+        const getServiceCandidates = () => {
+            let candidates = (netL3Pools[serviceL3] || []).filter(c => isolatedCores.includes(c) && !isAssigned(c)).sort((a, b) => parseInt(a) - parseInt(b));
+            if (candidates.length === 0 && workL3Keys.length > 0) {
+                // Try adjacent pools
+                for (const l3 of workL3Keys) {
+                    const extra = (netL3Pools[l3] || []).filter(c => isolatedCores.includes(c) && !isAssigned(c)).sort((a, b) => parseInt(a) - parseInt(b));
+                    candidates = candidates.concat(extra);
+                }
+            }
+            return candidates;
+        };
+
+        const servicePool = getServiceCandidates();
         let svcIdx = 0;
         const getSvc = () => svcIdx < servicePool.length ? servicePool[svcIdx++] : null;
 
@@ -155,13 +174,16 @@ const HFT_RULES = {
         const arCore = getSvc();
         if (arCore) { assignRole(arCore, 'ar'); assignRole(arCore, 'formula'); recommendations.push({ title: '🔄 AR+Formula', cores: [arCore], description: `Ядро ${arCore}`, rationale: 'НЕ на Trash!' }); }
 
-        // IRQ + Gateways
+        // IRQ + Gateways (Mandatory!)
         const neededIrq = Math.max(2, currentRoles['net_irq']?.length || 2);
         const neededGw = calcNeeded(currentRoles['gateway']);
         const gwLoad = getLoad(currentRoles['gateway']);
 
         const workPool = {};
-        workL3Keys.forEach(l3 => { workPool[l3] = (netL3Pools[l3] || []).filter(c => isolatedCores.includes(c) && !isAssigned(c)).sort((a, b) => parseInt(a) - parseInt(b)); });
+        workL3Keys.forEach(l3 => {
+            // Re-fetch because service assignment might have consumed some
+            workPool[l3] = (netL3Pools[l3] || []).filter(c => isolatedCores.includes(c) && !isAssigned(c)).sort((a, b) => parseInt(a) - parseInt(b));
+        });
 
         const irqCores = [], irqPerL3 = {};
         let irqN = neededIrq, l3i = 0;
@@ -182,11 +204,18 @@ const HFT_RULES = {
         if (gwCores.length > 0) recommendations.push({ title: '🚪 Gateways', cores: gwCores, description: `${gwCores.length} ядер`, rationale: `~${gwLoad.toFixed(0)}%`, warning: gwCores.length < neededGw ? `Нужно ${neededGw}!` : null });
 
         // Isolated robots
+        // "Diamond pool... but if < 4... add to another pool from adjacent L3/node"
         const isoRobots = [];
         workL3Keys.forEach(l3 => { (workPool[l3] || []).forEach(c => { if (!isAssigned(c)) isoRobots.push(c); }); });
         const MIN_ISO = 4;
-        if (isoRobots.length >= MIN_ISO) { isoRobots.forEach(c => assignRole(c, 'isolated_robots')); recommendations.push({ title: '💎 Isolated Robots', cores: isoRobots, description: `${isoRobots.length} ядер`, rationale: 'ЛУЧШИЙ! Tier 1' }); }
-        else if (isoRobots.length > 0) warnings.push(`${isoRobots.length} свободных < 4 для Isolated`);
+
+        if (isoRobots.length >= MIN_ISO) {
+            isoRobots.forEach(c => assignRole(c, 'isolated_robots'));
+            recommendations.push({ title: '💎 Isolated Robots', cores: isoRobots, description: `${isoRobots.length} ядер`, rationale: 'ЛУЧШИЙ! Tier 1' });
+        } else if (isoRobots.length > 0) {
+            // Check if we can move them to pool1 (adjacent node)
+            // warnings.push(`${isoRobots.length} свободных < 4 для Isolated -> Pool 1`);
+        }
 
         // Robot pools
         const pool1 = [], pool2 = [], defCores = [];
@@ -194,6 +223,7 @@ const HFT_RULES = {
 
         if (otherNumas.length >= 1) {
             const n1 = (topology.byNuma[otherNumas[0]] || []).filter(c => isolatedCores.includes(c) && !isAssigned(c));
+            // Move leftovers from Isolated attempt to Pool 1
             if (isoRobots.length > 0 && isoRobots.length < MIN_ISO) isoRobots.forEach(c => { assignRole(c, 'pool1'); pool1.push(c); });
             n1.forEach(c => { assignRole(c, 'pool1'); pool1.push(c); });
             if (pool1.length > 0) recommendations.push({ title: '🤖 Pool 1', cores: pool1, description: `NUMA ${otherNumas[0]}: ${pool1.length}`, rationale: 'Tier 2' });
