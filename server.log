@@ -14,3 +14,15 @@
 127.0.0.1 - - [14/Dec/2025 08:07:11] "GET /public/styles.css HTTP/1.1" 200 -
 127.0.0.1 - - [14/Dec/2025 08:07:11] "GET /public/hft-rules.js HTTP/1.1" 200 -
 127.0.0.1 - - [14/Dec/2025 08:07:11] "GET /public/app.js HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:53:36] "GET /public/index.html HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:53:36] "GET /public/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:53:36] "GET /public/hft-rules.js HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:53:36] "GET /public/app.js HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:55:26] "GET /public/index.html HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:55:26] "GET /public/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:55:26] "GET /public/app.js HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:55:26] "GET /public/hft-rules.js HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:55:40] "GET /public/index.html HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:55:40] "GET /public/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:55:40] "GET /public/hft-rules.js HTTP/1.1" 200 -
+127.0.0.1 - - [14/Dec/2025 08:55:40] "GET /public/app.js HTTP/1.1" 200 -

@@ -383,40 +383,56 @@ const HFT = {
     renderBlueprint() {
         const canvas = document.getElementById('canvas');
         const geometry = this.state.geometry;
-        const totalCores = Object.keys(this.state.coreNumaMap).length;
 
-        // CSS Grid Layout handles most of the structure now
+        if (!geometry || Object.keys(geometry).length === 0) {
+            canvas.innerHTML = `<div class="canvas-empty"><p>No data to render</p></div>`;
+            return;
+        }
+
+        // Grid Container
         let html = `<div class="blueprint">`;
-        const sockets = Object.keys(geometry).sort((a, b) => parseInt(a) - parseInt(b));
 
-        // Render Sockets directly into grid
+        const sockets = Object.keys(geometry).sort((a, b) => parseInt(a) - parseInt(b));
         sockets.forEach(socketId => {
             html += this.renderSocket(socketId, geometry[socketId]);
         });
 
         html += '</div>';
         canvas.innerHTML = html;
+
+        // Apply colors after render
         Object.keys(this.state.coreNumaMap).forEach(cpu => this.updateCoreVisual('Physical', cpu));
     },
 
     renderSocket(socketId, numaData) {
-        let html = `<div class="socket" data-socket="${socketId}">`;
-        html += `<div class="socket-label"><span>SOCKET ${socketId}</span></div><div class="socket-content">`;
+        let html = `<div class="socket">
+            <div class="socket-label">Socket ${socketId}</div>
+            <div class="socket-content">`;
 
         Object.keys(numaData).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
             const isNetwork = this.state.netNumaNodes.has(numaId);
-            html += `<div class="numa ${isNetwork ? 'is-network' : ''}" data-numa="${numaId}">`;
-            html += `<div class="numa-label"><span>NUMA ${numaId}</span>${isNetwork ? '<span class="network-badge">NET</span>' : ''}</div>`;
+            html += `<div class="numa ${isNetwork ? 'is-network' : ''}">
+                <div class="numa-label">
+                    <span>NUMA ${numaId}</span>
+                    ${isNetwork ? '<span class="network-badge">NET</span>' : ''}
+                </div>`;
 
+            // L3 Groups
             Object.keys(numaData[numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
-                html += `<div class="l3"><div class="l3-label">L3 #${l3Id}</div><div class="cores-grid">`;
-                numaData[numaId][l3Id].forEach(cpu => { html += this.renderCore('Physical', cpu); });
-                html += '</div></div>';
+                html += `<div class="l3">
+                    <div class="l3-label">L3 Cache #${l3Id}</div>
+                    <div class="cores-grid">`;
+
+                numaData[numaId][l3Id].forEach(cpu => {
+                    html += this.renderCore('Physical', cpu);
+                });
+
+                html += `</div></div>`;
             });
-            html += '</div>';
+            html += `</div>`;
         });
 
-        html += '</div></div>';
+        html += `</div></div>`;
         return html;
     },
 
