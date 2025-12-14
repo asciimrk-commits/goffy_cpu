@@ -88,6 +88,14 @@ body {
     /* Enables child scroll */
 }
 
+/* CRITICAL: sidebar-inner must be flex column with overflow */
+.sidebar-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
 .sidebar.collapsed {
     margin-left: calc(var(--sidebar-width) * -1);
 }
@@ -1074,11 +1082,14 @@ body {
 .tab-content {
     display: none;
     height: 100%;
+    overflow: hidden;
 }
 
 .tab-content.active {
     display: flex;
     flex-direction: column;
+    overflow: auto;
+    min-height: 0;
 }
 
 /* Phase 1: Drag & Drop active state */
