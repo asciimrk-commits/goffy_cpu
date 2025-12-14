@@ -4,14 +4,14 @@
 
 const HFT_RULES = {
     version: '4.5',
-    
+
     categories: {
         system: { name: 'System', roles: ['sys_os'] },
         network: { name: 'Network Stack', roles: ['net_irq', 'udp', 'trash'] },
         gateway: { name: 'Gateways', roles: ['gateway'] },
         logic: { name: 'Trading Logic', roles: ['isolated_robots', 'pool1', 'pool2', 'robot_default', 'ar', 'rf', 'formula', 'click'] }
     },
-    
+
     roles: {
         sys_os: { id: 'sys_os', name: 'System (OS)', category: 'system', color: '#5c6b7a', priority: 100 },
         net_irq: { id: 'net_irq', name: 'IRQ (Network)', category: 'network', color: '#e63946', priority: 95 },
@@ -28,7 +28,7 @@ const HFT_RULES = {
         click: { id: 'click', name: 'ClickHouse', category: 'logic', color: '#4f46e5', priority: 40 },
         isolated: { id: 'isolated', name: 'Isolated', category: 'state', color: '#ffffff', priority: 1, isStateFlag: true }
     },
-    
+
     rules: [
         { id: 'irq-isolated', severity: 'error', check: (s) => {
             const issues = [];
@@ -85,48 +85,48 @@ const HFT_RULES = {
             return (Object.keys(s.coreNumaMap).length > 0 && !found) ? [{ message: 'Нет роботов!' }] : [];
         }}
     ],
-    
+
     getCoreL3(state, cpu) {
         for (const [key, cores] of Object.entries(state.l3Groups || {})) {
             if (cores.includes(cpu) || cores.includes(cpu.toString())) return key;
         }
         return `numa-${state.coreNumaMap[cpu] || '0'}`;
     },
-    
+
     runValidation(state) {
         const issues = [];
         this.rules.forEach(r => r.check(state).forEach(i => issues.push({ ruleId: r.id, severity: r.severity, message: i.message })));
         return issues;
     },
-    
+
     generateRecommendation(state) {
         const totalCores = Object.keys(state.coreNumaMap).length;
         const netNuma = [...state.netNumaNodes][0] || '0';
         const isolatedCores = [...state.isolatedCores];
         const topology = this.analyzeTopology(state);
-        
+
         const currentRoles = {};
         Object.entries(state.instances?.Physical || {}).forEach(([cpu, tags]) => {
             tags.forEach(t => { if (!currentRoles[t]) currentRoles[t] = []; currentRoles[t].push(cpu); });
         });
-        
+
         const getLoad = (cores) => !cores?.length ? 0 : cores.reduce((s, c) => s + parseFloat(state.cpuLoadMap[c] || 0), 0) / cores.length;
         const getTotalLoad = (cores) => !cores?.length ? 0 : cores.reduce((s, c) => s + parseFloat(state.cpuLoadMap[c] || 0), 0);
         const calcNeeded = (cores, target = 25) => { const t = getTotalLoad(cores); return t === 0 ? (cores?.length || 1) : Math.max(1, Math.ceil(t / target)); };
-        
+
         const proposed = { Physical: {} };
         const recommendations = [];
         const warnings = [];
-        
+
         const assignRole = (cpu, role) => { if (!proposed.Physical[cpu]) proposed.Physical[cpu] = []; if (!proposed.Physical[cpu].includes(role)) proposed.Physical[cpu].push(role); };
         const isAssigned = (cpu) => proposed.Physical[cpu]?.length > 0;
-        
+
         const netNumaCores = topology.byNuma[netNuma] || [];
         const netL3Pools = topology.byNumaL3[netNuma] || {};
         const netL3Keys = Object.keys(netL3Pools).sort((a, b) => (parseInt(a.split('-').pop()) || 0) - (parseInt(b.split('-').pop()) || 0));
         const numSockets = Object.keys(state.geometry || {}).length;
         const numNumas = Object.keys(topology.byNuma).length;
-        
+
         // OS
         const osCores = netNumaCores.filter(c => !isolatedCores.includes(c));
         const osLoad = getLoad(currentRoles['sys_os'] || osCores);
@@ -134,7 +134,7 @@ const HFT_RULES = {
         osNeeded = Math.min(osNeeded, osCores.length);
         const assignedOsCores = osCores.slice(0, osNeeded);
         assignedOsCores.forEach(cpu => assignRole(cpu, 'sys_os'));
-        
+
         let serviceL3 = null;
         for (const l3 of netL3Keys) { if (netL3Pools[l3].some(c => assignedOsCores.includes(c))) { serviceL3 = l3; break; } }
         if (!serviceL3 && netL3Keys.length > 0) serviceL3 = netL3Keys[0];
@@ -145,9 +145,9 @@ const HFT_RULES = {
         if (workL3Keys.length === 0 && netL3Keys.length > 0) {
             workL3Keys = [serviceL3]; // Fallback for single L3 systems
         }
-        
+
         recommendations.push({ title: '🖥️ OS', cores: assignedOsCores, description: `${assignedOsCores.length} ядер`, rationale: `~${osLoad.toFixed(0)}%` });
-        
+
         // Service cores
         // Strive to flush one L3 pool (serviceL3), but if impossible move to adjacent (workL3Keys)
         const getServiceCandidates = () => {
@@ -165,26 +165,26 @@ const HFT_RULES = {
         const servicePool = getServiceCandidates();
         let svcIdx = 0;
         const getSvc = () => svcIdx < servicePool.length ? servicePool[svcIdx++] : null;
-        
+
         const trashCore = getSvc();
         if (trashCore) { assignRole(trashCore, 'trash'); assignRole(trashCore, 'rf'); assignRole(trashCore, 'click'); recommendations.push({ title: '🗑️ Trash+RF+Click', cores: [trashCore], description: `Ядро ${trashCore}`, rationale: 'Сервисный L3' }); }
-        
+
         if ((currentRoles['udp']?.length || 0) > 0) { const c = getSvc(); if (c) { assignRole(c, 'udp'); recommendations.push({ title: '📡 UDP', cores: [c], description: `Ядро ${c}`, rationale: 'Макс 1' }); } }
-        
+
         const arCore = getSvc();
         if (arCore) { assignRole(arCore, 'ar'); assignRole(arCore, 'formula'); recommendations.push({ title: '🔄 AR+Formula', cores: [arCore], description: `Ядро ${arCore}`, rationale: 'НЕ на Trash!' }); }
-        
+
         // IRQ + Gateways (Mandatory!)
         const neededIrq = Math.max(2, currentRoles['net_irq']?.length || 2);
         const neededGw = calcNeeded(currentRoles['gateway']);
         const gwLoad = getLoad(currentRoles['gateway']);
-        
+
         const workPool = {};
         workL3Keys.forEach(l3 => {
             // Re-fetch because service assignment might have consumed some
             workPool[l3] = (netL3Pools[l3] || []).filter(c => isolatedCores.includes(c) && !isAssigned(c)).sort((a, b) => parseInt(a) - parseInt(b));
         });
-        
+
         const irqCores = [], irqPerL3 = {};
         let irqN = neededIrq, l3i = 0;
         while (irqN > 0 && l3i < neededIrq * workL3Keys.length) {
@@ -193,7 +193,7 @@ const HFT_RULES = {
             l3i++;
         }
         if (irqCores.length > 0) recommendations.push({ title: '⚡ IRQ', cores: irqCores, description: `${irqCores.length} ядер`, rationale: `L3: ${Object.entries(irqPerL3).map(([l, c]) => `${l}:${c.length}`).join(', ')}` });
-        
+
         const gwCores = [], gwPerL3 = {};
         let gwN = neededGw; l3i = 0;
         while (gwN > 0 && l3i < neededGw * workL3Keys.length) {
@@ -202,7 +202,7 @@ const HFT_RULES = {
             l3i++;
         }
         if (gwCores.length > 0) recommendations.push({ title: '🚪 Gateways', cores: gwCores, description: `${gwCores.length} ядер`, rationale: `~${gwLoad.toFixed(0)}%`, warning: gwCores.length < neededGw ? `Нужно ${neededGw}!` : null });
-        
+
         // Isolated robots
         // "Diamond pool... but if < 4... add to another pool from adjacent L3/node"
         const isoRobots = [];
@@ -216,11 +216,11 @@ const HFT_RULES = {
             // Check if we can move them to pool1 (adjacent node)
             // warnings.push(`${isoRobots.length} свободных < 4 для Isolated -> Pool 1`);
         }
-        
+
         // Robot pools
         const pool1 = [], pool2 = [], defCores = [];
         const otherNumas = Object.keys(topology.byNuma).filter(n => n !== netNuma).sort((a, b) => parseInt(a) - parseInt(b));
-        
+
         if (otherNumas.length >= 1) {
             const n1 = (topology.byNuma[otherNumas[0]] || []).filter(c => isolatedCores.includes(c) && !isAssigned(c));
             // Move leftovers from Isolated attempt to Pool 1
@@ -239,10 +239,10 @@ const HFT_RULES = {
             }
             if (defCores.length > 0) recommendations.push({ title: '🤖 Default', cores: defCores, description: `${defCores.length} ядер`, rationale: 'Tier 4' });
         }
-        
+
         const allRobots = [...(isoRobots.length >= MIN_ISO ? isoRobots : []), ...pool1, ...pool2, ...defCores];
         if (allRobots.length === 0) warnings.push('НЕТ РОБОТОВ!');
-        
+
         // HTML
         let html = '<div class="recommend-result">';
         html += `<div class="recommend-section"><h3>⚠️ Важно!</h3><div class="recommend-card warning"><p><strong>Сбор:</strong> cpu-map.sh минимум <strong>2 минуты</strong> в <strong>торговый день</strong>!</p><p style="font-size:11px;color:var(--text-muted);margin-top:8px;">В выходной нагрузка 1%, в торговый 85%+</p></div></div>`;
@@ -258,10 +258,10 @@ const HFT_RULES = {
         html += `<div class="recommend-section"><h3>🏆 Градация</h3><div class="recommend-card"><table style="width:100%;font-size:11px;"><tr style="border-bottom:1px solid var(--border-subtle);"><th>Tier</th><th>Пул</th><th>Ядер</th></tr><tr><td style="color:#10b981;">💎1</td><td>Isolated</td><td>${isoRobots.length >= MIN_ISO ? isoRobots.length : 0}</td></tr><tr><td style="color:#3b82f6;">🥈2</td><td>Pool 1</td><td>${pool1.length}</td></tr><tr><td style="color:#6366f1;">🥉3</td><td>Pool 2</td><td>${pool2.length}</td></tr><tr><td style="color:#2ec4b6;">4</td><td>Default</td><td>${defCores.length}</td></tr></table></div></div>`;
         html += `<div class="recommend-section"><h3>📈 Итого</h3><div class="recommend-card ${allRobots.length === 0 ? 'warning' : 'success'}"><p><strong>IRQ:</strong> ${irqCores.length} | <strong>GW:</strong> ${gwCores.length} | <strong>Роботов:</strong> ${allRobots.length}</p><p><strong>Использовано:</strong> ${Object.keys(proposed.Physical).length}/${totalCores}</p></div></div>`;
         html += '</div>';
-        
+
         return { html, proposedConfig: { instances: proposed }, recommendations, warnings };
     },
-    
+
     analyzeTopology(state) {
         const r = { byNuma: {}, byL3: {}, byNumaL3: {} };
         Object.entries(state.coreNumaMap).forEach(([cpu, numa]) => { if (!r.byNuma[numa]) r.byNuma[numa] = []; r.byNuma[numa].push(cpu); });
