@@ -388,15 +388,15 @@ const HFT = {
             canvas.innerHTML = `<div class="canvas-empty"><p>No data to render</p></div>`;
             return;
         }
-        
+
         // Grid Container
         let html = `<div class="blueprint">`;
-        
+
         const sockets = Object.keys(geometry).sort((a, b) => parseInt(a) - parseInt(b));
         sockets.forEach(socketId => {
             html += this.renderSocket(socketId, geometry[socketId]);
         });
-        
+
         html += '</div>';
         canvas.innerHTML = html;
 
@@ -408,7 +408,7 @@ const HFT = {
         let html = `<div class="socket">
             <div class="socket-label">Socket ${socketId}</div>
             <div class="socket-content">`;
-        
+
         Object.keys(numaData).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
             const isNetwork = this.state.netNumaNodes.has(numaId);
             html += `<div class="numa ${isNetwork ? 'is-network' : ''}">
@@ -416,7 +416,7 @@ const HFT = {
                     <span>NUMA ${numaId}</span>
                     ${isNetwork ? '<span class="network-badge">NET</span>' : ''}
                 </div>`;
-            
+
             // L3 Groups
             Object.keys(numaData[numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
                 html += `<div class="l3">
