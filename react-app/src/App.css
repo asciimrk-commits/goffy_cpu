@@ -60,8 +60,21 @@ body {
 }
 
 .sidebar.collapsed {
-  width: 40px;
-  min-width: 40px;
+  width: 60px;
+  min-width: 60px;
+}
+
+.sidebar.collapsed .logo-text {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-content {
+  display: none;
+}
+
+.sidebar.collapsed .logo-cross {
+  font-size: 24px;
+  margin-left: 0;
 }
 
 .sidebar-toggle {

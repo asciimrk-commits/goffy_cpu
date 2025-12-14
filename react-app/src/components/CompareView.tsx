@@ -60,7 +60,7 @@ function ComparePanel({ config }: { config: ConfigData | null }) {
                         className={`cmp-core ${hasMultipleRoles ? 'multi-role' : ''}`}
                         style={{
                           background,
-                          borderColor: isIsolated ? '#f59e0b' : 'transparent',
+                          borderColor: isIsolated ? '#606080' : 'transparent',
                         }}
                       >
                         <span className="core-id">{cpuId}</span>

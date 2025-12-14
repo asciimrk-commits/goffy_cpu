@@ -330,7 +330,7 @@ export function parseYamlConfig(text: string): ParseResult | null {
             }
         }
 
-        // Parse CPUAlias entries
+        // Parse CPUAlias entries (e.g., <CPUAlias Name="RobotsNode1" Cores="48-71">)
         const aliasMatch = trimmed.match(/CPUAlias\s+Name="([^"]+)"\s+Cores="([^"]+)"/);
         if (aliasMatch) {
             const aliasName = aliasMatch[1];
@@ -338,7 +338,12 @@ export function parseYamlConfig(text: string): ParseResult | null {
 
             let role = 'isolated';
             if (aliasName.toLowerCase().includes('formula')) role = 'formula';
-            else if (aliasName.toLowerCase().includes('robot')) role = 'robots';
+            else if (aliasName === 'RobotsNode1' || aliasName.includes('Pool1')) role = 'pool1';
+            else if (aliasName === 'RobotsNode2' || aliasName.includes('Pool2')) role = 'pool2';
+            else if (aliasName === 'RobotsNode3' || aliasName.includes('Pool3')) role = 'pool2';
+            else if (aliasName.includes('IsolatedRobots')) role = 'isolated_robots';
+            else if (aliasName.includes('RobotsDefault')) role = 'robot_default';
+            else if (aliasName.toLowerCase().includes('robot')) role = 'robot_default';
             else if (aliasName.toLowerCase().includes('isolated')) role = 'isolated';
 
             cores.forEach(core => {

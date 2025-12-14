@@ -24,7 +24,7 @@ function Core({ cpuId, roles, isIsolated, load }: CoreProps) {
 
     const primaryRole = roles[0];
     const roleColor = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#1e293b';
-    const borderColor = isIsolated ? '#f59e0b' : 'transparent';
+    const borderColor = isIsolated ? '#606080' : 'transparent';
     const hasMultipleRoles = roles.length > 1;
 
     // For multi-role: show gradient or split colors
