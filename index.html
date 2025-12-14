@@ -94,28 +94,6 @@
                 </div>
             </section>
 
-            <!-- Import/Export -->
-            <section class="panel">
-                <h3 class="panel-title">
-                    <span class="panel-icon">↔</span>
-                    Import / Export
-                </h3>
-                <div class="btn-group vertical">
-                    <button class="btn btn-secondary" onclick="HFT.exportConfig()">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-                        </svg>
-                        Export JSON
-                    </button>
-                    <button class="btn btn-secondary" onclick="HFT.importConfig()">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                        </svg>
-                        Import JSON
-                    </button>
-                </div>
-            </section>
-
             <!-- Validation -->
             <section class="panel">
                 <h3 class="panel-title">
@@ -217,36 +195,39 @@
                 <div class="cmp-side">
                     <div class="cmp-header">
                         <div class="cmp-badge cmp-old">OLD</div>
-                        <span class="cmp-server" id="cmp-server-old">No config loaded</span>
+                        <input type="text" class="cmp-server-input" id="cmp-server-old" placeholder="Server name...">
                         <div class="cmp-actions">
-                            <button class="btn btn-sm" onclick="HFT.loadCompareFile('old')">Load</button>
+                            <button class="btn btn-sm btn-primary" onclick="HFT.parseCompareText('old')">Parse</button>
                             <button class="btn btn-sm" onclick="HFT.clearCompare('old')">Clear</button>
                         </div>
                     </div>
-                    <div class="cmp-body" id="compare-old">
-                        <div class="cmp-empty" onclick="HFT.loadCompareFile('old')">
-                            <div class="cmp-empty-icon">◈</div>
-                            <div>Drop JSON or click to load</div>
-                        </div>
+                    <div class="cmp-input-area">
+                        <textarea class="cmp-textarea" id="cmp-text-old" placeholder="Paste BENDER config here...
+Example:
+{'RobotsDefault': [5, 6, 7],
+ 'GatewaysDefault': [8, 9, 10],
+ 'Isolated': [5, 6, 7, 8, 9, 10]}
+Cpu count: 96
+node0: 0-23
+node1: 24-47"></textarea>
                     </div>
+                    <div class="cmp-body" id="compare-old"></div>
                 </div>
                 
                 <!-- RIGHT: NEW -->
                 <div class="cmp-side">
                     <div class="cmp-header">
                         <div class="cmp-badge cmp-new">NEW</div>
-                        <span class="cmp-server" id="cmp-server-new">No config loaded</span>
+                        <input type="text" class="cmp-server-input" id="cmp-server-new" placeholder="Server name...">
                         <div class="cmp-actions">
-                            <button class="btn btn-sm" onclick="HFT.loadCompareFile('new')">Load</button>
+                            <button class="btn btn-sm btn-primary" onclick="HFT.parseCompareText('new')">Parse</button>
                             <button class="btn btn-sm" onclick="HFT.clearCompare('new')">Clear</button>
                         </div>
                     </div>
-                    <div class="cmp-body" id="compare-new">
-                        <div class="cmp-empty" onclick="HFT.loadCompareFile('new')">
-                            <div class="cmp-empty-icon">◈</div>
-                            <div>Drop JSON or click to load</div>
-                        </div>
+                    <div class="cmp-input-area">
+                        <textarea class="cmp-textarea" id="cmp-text-new" placeholder="Paste BENDER config here..."></textarea>
                     </div>
+                    <div class="cmp-body" id="compare-new"></div>
                 </div>
             </div>
         </div>
