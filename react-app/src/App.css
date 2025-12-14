@@ -555,6 +555,11 @@ body {
   gap: 8px;
 }
 
+.file-input-row {
+  display: flex;
+  gap: 8px;
+}
+
 .input-server {
   padding: 8px 12px;
   background: var(--bg-panel);
