@@ -581,6 +581,9 @@ const HFT = {
         'RobotsPool1': 'pool1',
         'RobotsPool2': 'pool2',
         'RobotsDefault': 'robot_default',
+        'RobotsNode1': 'robot_default',
+        'RobotsNode2': 'robot_default',
+        'RobotsNode3': 'robot_default',
         'AllRobotsThCPU': 'ar',
         'RemoteFormulaCPU': 'rf',
         'Formula': 'formula',
@@ -815,6 +818,31 @@ const HFT = {
     // =========================================================================
     // COMPARE
     // =========================================================================
+    loadCompareFile(side) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.txt,.log,.conf,.cfg';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                const text = evt.target.result;
+                document.getElementById(`cmp-text-${side}`).value = text;
+                
+                // Auto-set server name from filename
+                const serverInput = document.getElementById(`cmp-server-${side}`);
+                if (serverInput && !serverInput.value) {
+                    const name = file.name.replace(/\.(txt|log|conf|cfg)$/i, '');
+                    serverInput.value = name;
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    },
+    
     parseCompareText(side) {
         const textArea = document.getElementById(`cmp-text-${side}`);
         const serverInput = document.getElementById(`cmp-server-${side}`);
@@ -847,45 +875,126 @@ const HFT = {
         };
         
         const lines = text.split('\n');
-        let cpuCount = 96; // default
         const numaRanges = {};
+        let currentSection = '';
         
         // Parse each line
         lines.forEach(line => {
-            line = line.trim();
-            if (!line) return;
+            const trimmed = line.trim();
+            if (!trimmed) return;
             
-            // Parse 'RoleName': [1, 2, 3] format
-            const roleMatch = line.match(/['"]?(\w+)['"]?\s*:\s*\[([^\]]*)\]/);
-            if (roleMatch) {
-                const benderName = roleMatch[1];
-                const coresStr = roleMatch[2];
-                const cores = this.parseCoreList(coresStr);
-                
-                if (benderName === 'Isolated') {
-                    config.isolatedCores = cores;
-                } else {
-                    // Map BENDER name to role ID
-                    const roleId = this.benderToRole[benderName];
-                    if (roleId && roleId !== 'isolated') {
-                        cores.forEach(cpu => {
-                            if (!config.instances.Physical[cpu]) config.instances.Physical[cpu] = [];
-                            config.instances.Physical[cpu].push(roleId);
-                        });
+            // Detect sections
+            if (trimmed.startsWith('@@')) {
+                if (trimmed.includes('NUMA')) currentSection = 'numa';
+                else if (trimmed.includes('ISOLATED')) currentSection = 'isolated';
+                else if (trimmed.includes('NETWORK')) currentSection = 'network';
+                else if (trimmed.includes('BENDER_NET')) currentSection = 'bender_net';
+                else if (trimmed.includes('BENDER')) currentSection = 'bender';
+                return;
+            }
+            
+            // Parse NUMA section: "node 0 cpus: 0 1 2 3..."
+            if (currentSection === 'numa') {
+                const match = trimmed.match(/node\s*(\d+)\s*cpus?:\s*(.+)/i);
+                if (match) {
+                    const numaId = match[1];
+                    const cores = match[2].trim().split(/\s+/).map(c => parseInt(c)).filter(c => !isNaN(c));
+                    numaRanges[numaId] = cores;
+                }
+                return;
+            }
+            
+            // Parse ISOLATED section: "8-95" or "0-4,94-95"
+            if (currentSection === 'isolated') {
+                const cores = this.parseCoreRange(trimmed);
+                cores.forEach(c => config.isolatedCores.push(c));
+                return;
+            }
+            
+            // Parse NETWORK section: "IF:net0|NUMA:1|..."
+            if (currentSection === 'network') {
+                const numaMatch = trimmed.match(/NUMA:(\d+)/i);
+                if (numaMatch) {
+                    const numaId = numaMatch[1];
+                    if (!config.netNumaNodes.includes(numaId)) {
+                        config.netNumaNodes.push(numaId);
                     }
                 }
                 return;
             }
             
-            // Parse Cpu count: N
-            const cpuMatch = line.match(/Cpu count:\s*(\d+)/i);
-            if (cpuMatch) {
-                cpuCount = parseInt(cpuMatch[1]);
+            // Parse BENDER_NET section: "net0: 42-47"
+            if (currentSection === 'bender_net') {
+                const match = trimmed.match(/net\d+:\s*(.+)/i);
+                if (match) {
+                    // Just skip, already got from NETWORK section
+                }
                 return;
             }
             
-            // Parse nodeN: 0-23
-            const nodeMatch = line.match(/node(\d+):\s*(.+)/i);
+            // Parse BENDER section
+            if (currentSection === 'bender') {
+                // Format 1: {cpu_id:0,isolated:True,RobotsDefault:[OTT4]}
+                if (trimmed.startsWith('{cpu_id:')) {
+                    const cpuMatch = trimmed.match(/cpu_id:(\d+)/);
+                    if (cpuMatch) {
+                        const cpu = parseInt(cpuMatch[1]);
+                        const cpuStr = String(cpu);
+                        
+                        // Check for roles
+                        const roleMatches = trimmed.matchAll(/(\w+):\[/g);
+                        for (const m of roleMatches) {
+                            const benderName = m[1];
+                            if (benderName === 'cpu_id' || benderName === 'isolated' || benderName === 'net_cpu') continue;
+                            
+                            const roleId = this.benderToRole[benderName];
+                            if (roleId) {
+                                if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                                if (!config.instances.Physical[cpuStr].includes(roleId)) {
+                                    config.instances.Physical[cpuStr].push(roleId);
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+                
+                // Format 2: {AllRobotsThCPU:[40], ... } or 'RoleName': [1, 2, 3]
+                // Summary block at end
+                const roleMatch = trimmed.match(/['"]?(\w+)['"]?\s*:\s*\[([^\]]*)\]/g);
+                if (roleMatch) {
+                    roleMatch.forEach(match => {
+                        const parts = match.match(/['"]?(\w+)['"]?\s*:\s*\[([^\]]*)\]/);
+                        if (parts) {
+                            const benderName = parts[1];
+                            const coresStr = parts[2];
+                            const cores = this.parseCoreList(coresStr);
+                            
+                            if (benderName === 'Isolated') {
+                                cores.forEach(c => {
+                                    if (!config.isolatedCores.includes(c)) config.isolatedCores.push(c);
+                                });
+                            } else {
+                                const roleId = this.benderToRole[benderName];
+                                if (roleId) {
+                                    cores.forEach(cpu => {
+                                        const cpuStr = String(cpu);
+                                        if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                                        if (!config.instances.Physical[cpuStr].includes(roleId)) {
+                                            config.instances.Physical[cpuStr].push(roleId);
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    });
+                }
+                return;
+            }
+            
+            // Outside sections - try to parse common formats
+            // nodeN: 0-23
+            const nodeMatch = trimmed.match(/^node(\d+):\s*(.+)/i);
             if (nodeMatch) {
                 const numaId = nodeMatch[1];
                 const cores = this.parseCoreRange(nodeMatch[2]);
@@ -893,22 +1002,42 @@ const HFT = {
                 return;
             }
             
-            // Parse @@BENDER_NET@@
-            if (line.includes('@@BENDER_NET@@')) return;
-            
-            // Parse netN: range
-            const netMatch = line.match(/net(\d+):\s*(.+)/i);
-            if (netMatch) {
-                const numaId = netMatch[1];
-                if (!config.netNumaNodes.includes(numaId)) {
-                    config.netNumaNodes.push(numaId);
-                }
+            // Cpu count: N
+            const cpuMatch = trimmed.match(/Cpu\s*count:\s*(\d+)/i);
+            if (cpuMatch) {
+                // Just for info, we build from NUMA
                 return;
+            }
+            
+            // System cpus: 0-4,94-95 (these are OS cores, no role needed)
+            
+            // 'RoleName': [cores] format outside BENDER section
+            const standaloneRole = trimmed.match(/['"]?(\w+)['"]?\s*:\s*\[([^\]]*)\]/);
+            if (standaloneRole) {
+                const benderName = standaloneRole[1];
+                const coresStr = standaloneRole[2];
+                const cores = this.parseCoreList(coresStr);
+                
+                if (benderName === 'Isolated') {
+                    cores.forEach(c => {
+                        if (!config.isolatedCores.includes(c)) config.isolatedCores.push(c);
+                    });
+                } else {
+                    const roleId = this.benderToRole[benderName];
+                    if (roleId) {
+                        cores.forEach(cpu => {
+                            const cpuStr = String(cpu);
+                            if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                            if (!config.instances.Physical[cpuStr].includes(roleId)) {
+                                config.instances.Physical[cpuStr].push(roleId);
+                            }
+                        });
+                    }
+                }
             }
         });
         
         // Build geometry from NUMA ranges
-        // Group NUMAs into sockets (2 NUMA per socket typically)
         const numaIds = Object.keys(numaRanges).sort((a, b) => parseInt(a) - parseInt(b));
         
         if (numaIds.length > 0) {
@@ -916,14 +1045,25 @@ const HFT = {
                 const socketId = Math.floor(idx / 2); // 2 NUMA per socket
                 if (!config.geometry[socketId]) config.geometry[socketId] = {};
                 config.geometry[socketId][numaId] = {
-                    '0': numaRanges[numaId] // Single L3 cache group
+                    '0': numaRanges[numaId]
                 };
             });
         } else {
-            // No NUMA info - create single socket/numa with all cores
-            const allCores = [];
-            for (let i = 0; i < cpuCount; i++) allCores.push(i);
-            config.geometry['0'] = { '0': { '0': allCores } };
+            // Fallback: create from isolated cores range
+            const maxCore = Math.max(...config.isolatedCores, 95);
+            const cpuCount = maxCore + 1;
+            const coresPerNuma = Math.ceil(cpuCount / 4);
+            
+            for (let numa = 0; numa < 4; numa++) {
+                const start = numa * coresPerNuma;
+                const end = Math.min(start + coresPerNuma, cpuCount);
+                const cores = [];
+                for (let i = start; i < end; i++) cores.push(i);
+                
+                const socketId = Math.floor(numa / 2);
+                if (!config.geometry[socketId]) config.geometry[socketId] = {};
+                config.geometry[socketId][numa] = { '0': cores };
+            }
         }
         
         return config;
