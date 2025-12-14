@@ -1144,6 +1144,26 @@ const HFT = {
             }
         }
 
+        // Post-processing: Infer OS cores
+        // Any core in geometry that is NOT isolated and has no role = OS core
+        const isolatedSet = new Set(config.isolatedCores.map(String));
+        Object.values(config.geometry).forEach(socket => {
+            Object.values(socket).forEach(numa => {
+                Object.values(numa).forEach(cores => {
+                    cores.forEach(cpu => {
+                        const cpuStr = String(cpu);
+                        const hasRole = config.instances.Physical[cpuStr]?.length > 0;
+                        const isIsolated = isolatedSet.has(cpuStr);
+
+                        if (!hasRole && !isIsolated) {
+                            if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                            config.instances.Physical[cpuStr].push('sys_os');
+                        }
+                    });
+                });
+            });
+        });
+
         return config;
     },
 

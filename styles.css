@@ -945,6 +945,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    grid-column: 1 / -1;
+    /* Span all columns in optimize-content grid */
 }
 
 .recommend-section {
