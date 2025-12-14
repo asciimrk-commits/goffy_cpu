@@ -661,8 +661,23 @@ const HFT = {
         // Get instance name from server name
         const instanceName = this.state.serverName?.toUpperCase() || 'INSTANCE';
 
-        // Get all NUMA nodes for membind
-        const allNumas = [...new Set(Object.values(Object.fromEntries(this.state.coreNumaMap)))].sort();
+        // Main taskset (trash_cpu or first available)
+        const trashCpu = physicalRoles['trash']?.[0] || '';
+
+        // Get NUMA of taskset core for membind
+        let membind = '';
+        if (trashCpu !== '') {
+            const tasksetNuma = this.state.coreNumaMap.get(String(trashCpu)) ||
+                this.state.coreNumaMap.get(trashCpu);
+            if (tasksetNuma !== undefined) {
+                membind = String(tasksetNuma);
+            }
+        }
+        // If no specific taskset or multiple instances, use all NUMAs
+        if (!membind) {
+            const allNumas = [...new Set(Object.values(Object.fromEntries(this.state.coreNumaMap)))].sort();
+            membind = allNumas.join(',');
+        }
 
         // Build YAML-style bs_instances config
         let txt = 'bs_instances:\n';
@@ -672,10 +687,7 @@ const HFT = {
         txt += `    id: 0\n`;
         txt += `    daemon_pri: dsf1.qb.loc:8051\n`;
         txt += `    daemon_sec: dsf3.qb.loc:8051\n`;
-        txt += `    membind: "${allNumas.join(',')}"\n`;
-
-        // Main taskset (trash_cpu or first available)
-        const trashCpu = physicalRoles['trash']?.[0] || '';
+        txt += `    membind: "${membind}"\n`;
         txt += `    taskset: "${trashCpu}"\n`;
         txt += `    trash_cpu: "${trashCpu}"\n`;
 
@@ -734,6 +746,36 @@ const HFT = {
         const clickCores = physicalRoles['click'] || [];
         if (clickCores.length > 0) {
             txt += `clickhouse: ${clickCores.join(',')}\n`;
+        }
+
+        // System config block
+        txt += '\n---\n';
+        txt += 'hft_tunels: true\n';
+
+        // isol_cpus - isolated cores range
+        if (isolatedCores.length > 0) {
+            txt += `isol_cpus: ${this.formatCoreRange(isolatedCores)}\n`;
+        }
+
+        // irqaffinity_cpus - non-isolated (OS) cores
+        const sysCores = (physicalRoles['sys_os'] || []).sort((a, b) => a - b);
+        if (sysCores.length > 0) {
+            txt += `irqaffinity_cpus: ${this.formatCoreRange(sysCores)}\n`;
+        }
+
+        // net_cpus - network interface to cores mapping
+        const netCores = physicalRoles['net_irq'] || [];
+        if (netCores.length > 0) {
+            txt += '\nnet_cpus:\n';
+            // Get network interfaces from state
+            const netInterfaces = this.state.networkInterfaces || [];
+            if (netInterfaces.length > 0) {
+                netInterfaces.forEach(iface => {
+                    txt += `  ${iface}: [${netCores.join(', ')}]\n`;
+                });
+            } else {
+                txt += `  net0: [${netCores.join(', ')}]\n`;
+            }
         }
 
         document.getElementById('output').textContent = txt;
