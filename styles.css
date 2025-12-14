@@ -899,6 +899,44 @@ html, body {
     flex-shrink: 0;
 }
 
+/* Info bar */
+.cmp-info {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 6px 0;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+/* L3 cache group */
+.cmp-l3 {
+    margin-bottom: 6px;
+}
+
+.cmp-l3:last-child {
+    margin-bottom: 0;
+}
+
+.cmp-l3.has-label {
+    background: rgba(255,255,255,0.02);
+    border-radius: 4px;
+    padding: 6px;
+}
+
+.cmp-l3-label {
+    font-size: 8px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.l3-count {
+    font-size: 8px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
 /* Responsive - stack on small screens */
 @media (max-width: 900px) {
     .cmp-grid {
