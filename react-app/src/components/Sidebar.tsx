@@ -88,7 +88,7 @@ node 0 size: 32000 MB
             <div className="sidebar-inner">
                 <div className="sidebar-header">
                     <div className="logo">
-                        <div className="logo-icon-bg">◈</div>
+                        <img src="/goffy_cpu/cpu-icon.png" alt="CPU" className="logo-icon" />
                         <div className="logo-text">
                             <span className="logo-hft">HFT</span>
                             <span className="logo-main">CPU<span className="logo-accent">MAPPER</span></span>

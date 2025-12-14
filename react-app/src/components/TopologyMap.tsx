@@ -1,5 +1,6 @@
 import { useAppStore } from '../store/appStore';
 import { ROLES } from '../types/topology';
+import { CoreTooltip } from './Tooltip';
 
 interface CoreProps {
     cpuId: number;
@@ -24,33 +25,33 @@ function Core({ cpuId, roles, isIsolated, load }: CoreProps) {
     const primaryRole = roles[0];
     const roleColor = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#1e293b';
     const borderColor = isIsolated ? '#f59e0b' : 'transparent';
-    const roleNames = roles.map(r => ROLES[r]?.name || r).join(', ');
     const hasMultipleRoles = roles.length > 1;
 
+    // For multi-role: show gradient or split colors
+    let background = roleColor;
+    if (hasMultipleRoles) {
+        const colors = roles.slice(0, 3).map(r => ROLES[r]?.color || '#64748b');
+        if (colors.length === 2) {
+            background = `linear-gradient(135deg, ${colors[0]} 50%, ${colors[1]} 50%)`;
+        } else if (colors.length >= 3) {
+            background = `linear-gradient(135deg, ${colors[0]} 33%, ${colors[1]} 33% 66%, ${colors[2]} 66%)`;
+        }
+    }
+
     return (
-        <div
-            onClick={handleClick}
-            className={`core ${hasMultipleRoles ? 'multi-role' : ''}`}
-            style={{
-                backgroundColor: roleColor,
-                borderColor,
-                cursor: activeTool ? 'pointer' : 'default',
-            }}
-            title={`CPU ${cpuId}${roleNames ? `: ${roleNames}` : ''}${load ? ` (${load.toFixed(1)}%)` : ''}`}
-        >
-            <span className="core-id">{cpuId}</span>
-            {hasMultipleRoles && (
-                <div className="role-dots">
-                    {roles.slice(0, 4).map((r, i) => (
-                        <span
-                            key={i}
-                            className="role-dot"
-                            style={{ backgroundColor: ROLES[r]?.color || '#64748b' }}
-                        />
-                    ))}
-                </div>
-            )}
-        </div>
+        <CoreTooltip cpuId={cpuId} roles={roles} load={load} isIsolated={isIsolated}>
+            <div
+                onClick={handleClick}
+                className={`core ${hasMultipleRoles ? 'multi-role' : ''}`}
+                style={{
+                    background,
+                    borderColor,
+                    cursor: activeTool ? 'pointer' : 'default',
+                }}
+            >
+                <span className="core-id">{cpuId}</span>
+            </div>
+        </CoreTooltip>
     );
 }
 

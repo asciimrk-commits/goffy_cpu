@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { parseTopology } from '../lib/parser';
 import { ROLES } from '../types/topology';
 import type { Geometry, InstanceConfig } from '../types/topology';
+import { CoreTooltip } from './Tooltip';
 
 interface ConfigData {
     serverName: string;
@@ -36,31 +37,36 @@ function ComparePanel({ config }: { config: ConfigData | null }) {
                                     const primaryRole = roles[0];
                                     const color = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#1e293b';
                                     const isIsolated = isolatedSet.has(cpuId);
-                                    const roleNames = roles.map(r => ROLES[r]?.name || r).join(', ');
+                                    const hasMultipleRoles = roles.length > 1;
+
+                                    // Gradient for multi-role
+                                    let background = color;
+                                    if (hasMultipleRoles) {
+                                        const colors = roles.slice(0, 3).map(r => ROLES[r]?.color || '#64748b');
+                                        if (colors.length === 2) {
+                                            background = `linear-gradient(135deg, ${colors[0]} 50%, ${colors[1]} 50%)`;
+                                        } else if (colors.length >= 3) {
+                                            background = `linear-gradient(135deg, ${colors[0]} 33%, ${colors[1]} 33% 66%, ${colors[2]} 66%)`;
+                                        }
+                                    }
 
                                     return (
-                                        <div
+                                        <CoreTooltip
                                             key={cpuId}
-                                            className={`cmp-core ${roles.length > 1 ? 'multi-role' : ''}`}
-                                            style={{
-                                                backgroundColor: color,
-                                                borderColor: isIsolated ? '#f59e0b' : 'transparent',
-                                            }}
-                                            title={`CPU ${cpuId}: ${roleNames || 'none'}`}
+                                            cpuId={cpuId}
+                                            roles={roles}
+                                            isIsolated={isIsolated}
                                         >
-                                            <span className="core-id">{cpuId}</span>
-                                            {roles.length > 1 && (
-                                                <div className="role-dots">
-                                                    {roles.slice(0, 3).map((r, i) => (
-                                                        <span
-                                                            key={i}
-                                                            className="role-dot"
-                                                            style={{ backgroundColor: ROLES[r]?.color || '#64748b' }}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
+                                            <div
+                                                className={`cmp-core ${hasMultipleRoles ? 'multi-role' : ''}`}
+                                                style={{
+                                                    background,
+                                                    borderColor: isIsolated ? '#f59e0b' : 'transparent',
+                                                }}
+                                            >
+                                                <span className="core-id">{cpuId}</span>
+                                            </div>
+                                        </CoreTooltip>
                                     );
                                 })}
                             </div>
@@ -95,10 +101,10 @@ export function CompareView() {
 
         if (side === 'old') {
             setOldConfig(config);
-            setOldServerName(serverName); // Auto-fill server name field
+            setOldServerName(serverName);
         } else {
             setNewConfig(config);
-            setNewServerName(serverName); // Auto-fill server name field
+            setNewServerName(serverName);
         }
     };
 
