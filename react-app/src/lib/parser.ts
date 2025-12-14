@@ -106,6 +106,14 @@ export function parseTopology(text: string): ParseResult {
                     const cpu = parseInt(cpuMatch[1]);
                     const cpuStr = String(cpu);
 
+                    // Extract server name from [NAME] pattern if not already set
+                    if (!result.serverName) {
+                        const nameMatch = trimmed.match(/\[([A-Z0-9]+)\]/);
+                        if (nameMatch) {
+                            result.serverName = nameMatch[1];
+                        }
+                    }
+
                     // Find role assignments
                     const rolePattern = /['"]?(\w+)['"]?\s*:\s*\[/g;
                     let match;
