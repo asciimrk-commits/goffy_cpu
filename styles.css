@@ -1033,3 +1033,31 @@ body {
     display: flex;
     flex-direction: column;
 }
+
+/* Phase 1: Drag & Drop active state */
+.drag-active {
+    outline: 2px dashed var(--accent) !important;
+    outline-offset: -2px;
+    background: var(--accent-light) !important;
+}
+
+/* Phase 1: PWA Install prompt (shown when installable) */
+.pwa-install-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    box-shadow: var(--shadow-md);
+    z-index: 1000;
+    display: none;
+}
+
+.pwa-install-btn:hover {
+    background: var(--accent-hover);
+}
