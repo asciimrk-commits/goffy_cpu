@@ -1,0 +1,60 @@
+import { Sidebar } from './components/Sidebar';
+import { TopologyMap } from './components/TopologyMap';
+import { useAppStore } from './store/appStore';
+import './App.css';
+
+function App() {
+  const { serverName, date, activeTab, setActiveTab } = useAppStore();
+
+  return (
+    <div className="app">
+      <Sidebar />
+
+      <main className="main-content">
+        {/* Header */}
+        <header className="header">
+          <div className="header-tabs">
+            <button
+              className={`tab ${activeTab === 'mapper' ? 'active' : ''}`}
+              onClick={() => setActiveTab('mapper')}
+            >
+              🗺️ CPU Mapper
+            </button>
+            <button
+              className={`tab ${activeTab === 'compare' ? 'active' : ''}`}
+              onClick={() => setActiveTab('compare')}
+            >
+              📊 Compare
+            </button>
+            <button
+              className={`tab ${activeTab === 'optimize' ? 'active' : ''}`}
+              onClick={() => setActiveTab('optimize')}
+            >
+              ⚡ Auto-Optimize
+            </button>
+          </div>
+
+          {serverName && (
+            <div className="header-info">
+              <span className="server-name">{serverName}</span>
+              {date && <span className="server-date">{date}</span>}
+            </div>
+          )}
+        </header>
+
+        {/* Content */}
+        <div className="content">
+          {activeTab === 'mapper' && <TopologyMap />}
+          {activeTab === 'compare' && (
+            <div className="placeholder">Compare feature coming soon...</div>
+          )}
+          {activeTab === 'optimize' && (
+            <div className="placeholder">Auto-Optimize feature coming soon...</div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default App;
