@@ -197,19 +197,25 @@
                         <div class="cmp-badge cmp-old">OLD</div>
                         <input type="text" class="cmp-server-input" id="cmp-server-old" placeholder="Server name...">
                         <div class="cmp-actions">
+                            <button class="btn btn-sm" onclick="HFT.loadCompareFile('old')" title="Load from file">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                                </svg>
+                            </button>
                             <button class="btn btn-sm btn-primary" onclick="HFT.parseCompareText('old')">Parse</button>
                             <button class="btn btn-sm" onclick="HFT.clearCompare('old')">Clear</button>
                         </div>
                     </div>
                     <div class="cmp-input-area">
-                        <textarea class="cmp-textarea" id="cmp-text-old" placeholder="Paste BENDER config here...
-Example:
-{'RobotsDefault': [5, 6, 7],
- 'GatewaysDefault': [8, 9, 10],
- 'Isolated': [5, 6, 7, 8, 9, 10]}
-Cpu count: 96
-node0: 0-23
-node1: 24-47"></textarea>
+                        <textarea class="cmp-textarea" id="cmp-text-old" placeholder="Paste cpu-map.sh output or load file...
+
+Supports formats:
+@@NUMA@@
+node 0 cpus: 0 1 2 3...
+
+@@BENDER@@
+{cpu_id:0,RobotsDefault:[OTT4]}
+..."></textarea>
                     </div>
                     <div class="cmp-body" id="compare-old"></div>
                 </div>
@@ -220,12 +226,17 @@ node1: 24-47"></textarea>
                         <div class="cmp-badge cmp-new">NEW</div>
                         <input type="text" class="cmp-server-input" id="cmp-server-new" placeholder="Server name...">
                         <div class="cmp-actions">
+                            <button class="btn btn-sm" onclick="HFT.loadCompareFile('new')" title="Load from file">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                                </svg>
+                            </button>
                             <button class="btn btn-sm btn-primary" onclick="HFT.parseCompareText('new')">Parse</button>
                             <button class="btn btn-sm" onclick="HFT.clearCompare('new')">Clear</button>
                         </div>
                     </div>
                     <div class="cmp-input-area">
-                        <textarea class="cmp-textarea" id="cmp-text-new" placeholder="Paste BENDER config here..."></textarea>
+                        <textarea class="cmp-textarea" id="cmp-text-new" placeholder="Paste cpu-map.sh output or load file..."></textarea>
                     </div>
                     <div class="cmp-body" id="compare-new"></div>
                 </div>
