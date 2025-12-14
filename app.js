@@ -650,72 +650,90 @@ const HFT = {
             });
         });
 
-        // Collect system cores (OS)
-        const sysCores = (physicalRoles['sys_os'] || []).sort((a, b) => a - b);
+        // Sort all role cores
+        Object.keys(physicalRoles).forEach(role => {
+            physicalRoles[role].sort((a, b) => a - b);
+        });
 
         // Collect isolated cores
         const isolatedCores = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a, b) => a - b);
 
-        // Build BENDER format output
-        let txt = '{';
-        const entries = [];
+        // Get instance name from server name
+        const instanceName = this.state.serverName?.toUpperCase() || 'INSTANCE';
 
-        // Add roles in BENDER format
-        Object.entries(this.roleToBender).forEach(([roleId, benderName]) => {
-            if (benderName && physicalRoles[roleId]?.length > 0) {
-                const cores = physicalRoles[roleId].sort((a, b) => a - b);
-                entries.push(`'${benderName}': [${cores.join(', ')}]`);
-            }
-        });
+        // Get all NUMA nodes for membind
+        const allNumas = [...new Set(Object.values(Object.fromEntries(this.state.coreNumaMap)))].sort();
 
-        // Add Isolated
-        if (isolatedCores.length > 0) {
-            entries.push(`'Isolated': [${isolatedCores.join(', ')}]`);
+        // Build YAML-style bs_instances config
+        let txt = 'bs_instances:\n';
+        txt += `  ${instanceName}:\n`;
+        txt += `    path: bender2-${instanceName}\n`;
+        txt += `    name: ${instanceName}\n`;
+        txt += `    id: 0\n`;
+        txt += `    daemon_pri: dsf1.qb.loc:8051\n`;
+        txt += `    daemon_sec: dsf3.qb.loc:8051\n`;
+        txt += `    membind: "${allNumas.join(',')}"\n`;
+
+        // Main taskset (trash_cpu or first available)
+        const trashCpu = physicalRoles['trash']?.[0] || '';
+        txt += `    taskset: "${trashCpu}"\n`;
+        txt += `    trash_cpu: "${trashCpu}"\n`;
+
+        // AllRobots CPU
+        const arCpu = physicalRoles['ar']?.[0] || '';
+        txt += `    allrobots_cpu: "${arCpu}"\n`;
+
+        // RemoteFormula CPU
+        const rfCpu = physicalRoles['rf']?.[0] || physicalRoles['trash']?.[0] || '';
+        txt += `    remoteformula_cpu: "${rfCpu}"\n`;
+
+        // Gateways
+        const gwCores = physicalRoles['gateway'] || [];
+        txt += `    gateways_cpu: ${gwCores.join(',')}\n`;
+
+        // Default robots
+        const robotsCores = physicalRoles['robot_default'] || [];
+        txt += `    robots_cpu: ${robotsCores.join(',')}\n`;
+
+        // UDP cores
+        const udpCores = physicalRoles['udp'] || [];
+        txt += `    udpsend_cpu: "${udpCores[0] || ''}"\n`;
+        txt += `    udpreceive_cpu: "${udpCores[0] || ''}"\n`;
+        txt += `    udp_emitstats: true\n`;
+        txt += `    type: colo\n`;
+
+        // CPUAlias custom entries
+        txt += `    cpualias_custom:\n`;
+
+        // Formula
+        const formulaCpu = physicalRoles['formula']?.[0] || physicalRoles['trash']?.[0] || '';
+        if (formulaCpu) {
+            txt += `      - <CPUAlias Name="Formula" Cores="${formulaCpu}" IoService="true" Debug="false" />\n`;
         }
 
-        txt += entries.join(',\n ');
-        txt += '}\n';
-
-        // Add stats
-        const cpuCount = Object.keys(this.state.coreNumaMap).length;
-        txt += `Cpu count: ${cpuCount}\n`;
-        txt += `System cpus count: ${sysCores.length}\n`;
-
-        // Format system cpus as range
-        if (sysCores.length > 0) {
-            txt += `System cpus: ${this.formatCoreRange(sysCores)}\n`;
+        // Isolated Robots (isolated cores not used by other roles)
+        const isolatedRobots = physicalRoles['isolated_robots'] || [];
+        if (isolatedRobots.length > 0) {
+            txt += `      - <CPUAlias Name="Isolated" Cores="${isolatedRobots.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO"/>\n`;
         }
 
-        // Find unused isolated cpus (isolated but no role)
-        const usedCores = new Set();
-        Object.values(physicalRoles).forEach(cores => cores.forEach(c => usedCores.add(c)));
-        const unusedIsolated = isolatedCores.filter(c => !usedCores.has(c));
-        if (unusedIsolated.length > 0) {
-            txt += `Unused bender isolated cpus: ${this.formatCoreRange(unusedIsolated)}\n`;
+        // Pool 1 (RobotsNode1)
+        const pool1 = physicalRoles['pool1'] || [];
+        if (pool1.length > 0) {
+            txt += `      - <CPUAlias Name="RobotsNode1" Cores="${pool1.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />\n`;
         }
 
-        // Add NUMA info
-        const numaRanges = {};
-        Object.entries(this.state.geometry).forEach(([socket, numaData]) => {
-            Object.entries(numaData).forEach(([numa, l3Data]) => {
-                const cores = [];
-                Object.values(l3Data).forEach(l3Cores => cores.push(...l3Cores));
-                numaRanges[numa] = cores.sort((a, b) => a - b);
-            });
-        });
+        // Pool 2 (RobotsNode2)
+        const pool2 = physicalRoles['pool2'] || [];
+        if (pool2.length > 0) {
+            txt += `      - <CPUAlias Name="RobotsNode2" Cores="${pool2.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />\n`;
+        }
 
-        Object.keys(numaRanges).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numa => {
-            txt += `node${numa}: ${this.formatCoreRange(numaRanges[numa])}\n`;
-        });
-
-        // Add NET NUMA info
-        if (this.state.netNumaNodes.size > 0) {
-            txt += '@@BENDER_NET@@\n';
-            [...this.state.netNumaNodes].sort().forEach(numa => {
-                if (numaRanges[numa]) {
-                    txt += `net${numa}: ${this.formatCoreRange(numaRanges[numa])}\n`;
-                }
-            });
+        // ClickHouse at the bottom
+        txt += '\n';
+        const clickCores = physicalRoles['click'] || [];
+        if (clickCores.length > 0) {
+            txt += `clickhouse: ${clickCores.join(',')}\n`;
         }
 
         document.getElementById('output').textContent = txt;
