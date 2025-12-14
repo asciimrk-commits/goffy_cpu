@@ -581,9 +581,9 @@ const HFT = {
         'RobotsPool1': 'pool1',
         'RobotsPool2': 'pool2',
         'RobotsDefault': 'robot_default',
-        'RobotsNode1': 'robot_default',
-        'RobotsNode2': 'robot_default',
-        'RobotsNode3': 'robot_default',
+        'RobotsNode1': 'pool1',
+        'RobotsNode2': 'pool2',
+        'RobotsNode3': 'pool2',
         'AllRobotsThCPU': 'ar',
         'RemoteFormulaCPU': 'rf',
         'Formula': 'formula',
@@ -875,21 +875,40 @@ const HFT = {
         };
         
         const lines = text.split('\n');
+        const lscpuData = {}; // cpu -> {numa, socket, core, l3}
         const numaRanges = {};
         let currentSection = '';
         
-        // Parse each line
+        // First pass: parse all sections
         lines.forEach(line => {
             const trimmed = line.trim();
             if (!trimmed) return;
             
             // Detect sections
             if (trimmed.startsWith('@@')) {
-                if (trimmed.includes('NUMA')) currentSection = 'numa';
+                if (trimmed.includes('LSCPU')) currentSection = 'lscpu';
+                else if (trimmed.includes('NUMA') && !trimmed.includes('NET')) currentSection = 'numa';
                 else if (trimmed.includes('ISOLATED')) currentSection = 'isolated';
                 else if (trimmed.includes('NETWORK')) currentSection = 'network';
                 else if (trimmed.includes('BENDER_NET')) currentSection = 'bender_net';
                 else if (trimmed.includes('BENDER')) currentSection = 'bender';
+                return;
+            }
+            
+            // Parse LSCPU section: CPU,NODE,SOCKET,CORE,L3
+            if (currentSection === 'lscpu') {
+                const parts = trimmed.split(',');
+                if (parts.length >= 5) {
+                    const cpu = parseInt(parts[0]);
+                    if (!isNaN(cpu)) {
+                        lscpuData[cpu] = {
+                            numa: parseInt(parts[1]),
+                            socket: parseInt(parts[2]),
+                            core: parseInt(parts[3]),
+                            l3: parseInt(parts[4])
+                        };
+                    }
+                }
                 return;
             }
             
@@ -904,10 +923,14 @@ const HFT = {
                 return;
             }
             
-            // Parse ISOLATED section: "8-95" or "0-4,94-95"
+            // Parse ISOLATED section: "8-95" or "5-93"
             if (currentSection === 'isolated') {
-                const cores = this.parseCoreRange(trimmed);
-                cores.forEach(c => config.isolatedCores.push(c));
+                if (!trimmed.includes('size:') && !trimmed.includes('node')) {
+                    const cores = this.parseCoreRange(trimmed);
+                    cores.forEach(c => {
+                        if (!config.isolatedCores.includes(c)) config.isolatedCores.push(c);
+                    });
+                }
                 return;
             }
             
@@ -923,29 +946,25 @@ const HFT = {
                 return;
             }
             
-            // Parse BENDER_NET section: "net0: 42-47"
-            if (currentSection === 'bender_net') {
-                const match = trimmed.match(/net\d+:\s*(.+)/i);
-                if (match) {
-                    // Just skip, already got from NETWORK section
-                }
-                return;
-            }
-            
             // Parse BENDER section
             if (currentSection === 'bender') {
-                // Format 1: {cpu_id:0,isolated:True,RobotsDefault:[OTT4]}
-                if (trimmed.startsWith('{cpu_id:')) {
-                    const cpuMatch = trimmed.match(/cpu_id:(\d+)/);
+                // Format: {'cpu_id': 0, 'isolated': True, 'RobotsDefault': ['OTT4']}
+                // or: {cpu_id:0,isolated:True,RobotsDefault:[OTT4]}
+                if (trimmed.startsWith('{') && trimmed.includes('cpu_id')) {
+                    // Extract cpu_id
+                    const cpuMatch = trimmed.match(/['"]?cpu_id['"]?\s*:\s*(\d+)/);
                     if (cpuMatch) {
                         const cpu = parseInt(cpuMatch[1]);
                         const cpuStr = String(cpu);
                         
-                        // Check for roles
-                        const roleMatches = trimmed.matchAll(/(\w+):\[/g);
-                        for (const m of roleMatches) {
-                            const benderName = m[1];
-                            if (benderName === 'cpu_id' || benderName === 'isolated' || benderName === 'net_cpu') continue;
+                        // Find all role assignments
+                        // Match patterns like: 'RobotsDefault': ['OTT4'] or RobotsDefault:[OTT4]
+                        const rolePattern = /['"]?(\w+)['"]?\s*:\s*\[/g;
+                        let match;
+                        while ((match = rolePattern.exec(trimmed)) !== null) {
+                            const benderName = match[1];
+                            // Skip non-role fields
+                            if (['cpu_id', 'isolated', 'net_cpu'].includes(benderName)) continue;
                             
                             const roleId = this.benderToRole[benderName];
                             if (roleId) {
@@ -959,110 +978,97 @@ const HFT = {
                     return;
                 }
                 
-                // Format 2: {AllRobotsThCPU:[40], ... } or 'RoleName': [1, 2, 3]
-                // Summary block at end
-                const roleMatch = trimmed.match(/['"]?(\w+)['"]?\s*:\s*\[([^\]]*)\]/g);
-                if (roleMatch) {
-                    roleMatch.forEach(match => {
-                        const parts = match.match(/['"]?(\w+)['"]?\s*:\s*\[([^\]]*)\]/);
-                        if (parts) {
-                            const benderName = parts[1];
-                            const coresStr = parts[2];
-                            const cores = this.parseCoreList(coresStr);
-                            
-                            if (benderName === 'Isolated') {
-                                cores.forEach(c => {
-                                    if (!config.isolatedCores.includes(c)) config.isolatedCores.push(c);
-                                });
-                            } else {
-                                const roleId = this.benderToRole[benderName];
-                                if (roleId) {
-                                    cores.forEach(cpu => {
-                                        const cpuStr = String(cpu);
-                                        if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
-                                        if (!config.instances.Physical[cpuStr].includes(roleId)) {
-                                            config.instances.Physical[cpuStr].push(roleId);
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                    });
-                }
-                return;
-            }
-            
-            // Outside sections - try to parse common formats
-            // nodeN: 0-23
-            const nodeMatch = trimmed.match(/^node(\d+):\s*(.+)/i);
-            if (nodeMatch) {
-                const numaId = nodeMatch[1];
-                const cores = this.parseCoreRange(nodeMatch[2]);
-                numaRanges[numaId] = cores;
-                return;
-            }
-            
-            // Cpu count: N
-            const cpuMatch = trimmed.match(/Cpu\s*count:\s*(\d+)/i);
-            if (cpuMatch) {
-                // Just for info, we build from NUMA
-                return;
-            }
-            
-            // System cpus: 0-4,94-95 (these are OS cores, no role needed)
-            
-            // 'RoleName': [cores] format outside BENDER section
-            const standaloneRole = trimmed.match(/['"]?(\w+)['"]?\s*:\s*\[([^\]]*)\]/);
-            if (standaloneRole) {
-                const benderName = standaloneRole[1];
-                const coresStr = standaloneRole[2];
-                const cores = this.parseCoreList(coresStr);
-                
-                if (benderName === 'Isolated') {
-                    cores.forEach(c => {
-                        if (!config.isolatedCores.includes(c)) config.isolatedCores.push(c);
-                    });
-                } else {
-                    const roleId = this.benderToRole[benderName];
-                    if (roleId) {
-                        cores.forEach(cpu => {
-                            const cpuStr = String(cpu);
-                            if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
-                            if (!config.instances.Physical[cpuStr].includes(roleId)) {
-                                config.instances.Physical[cpuStr].push(roleId);
-                            }
+                // Summary block: {'AllRobotsThCPU': [40], ...} or multiline
+                // Match role: [cores] patterns
+                const summaryPattern = /['"]?(\w+)['"]?\s*:\s*\[([^\]]*)/g;
+                let match;
+                while ((match = summaryPattern.exec(trimmed)) !== null) {
+                    const benderName = match[1];
+                    const coresStr = match[2];
+                    
+                    // Skip if it looks like instance names like ['OTT4']
+                    if (coresStr.includes("'") || coresStr.includes('"')) continue;
+                    
+                    const cores = this.parseCoreList(coresStr);
+                    if (cores.length === 0) continue;
+                    
+                    if (benderName === 'Isolated') {
+                        cores.forEach(c => {
+                            if (!config.isolatedCores.includes(c)) config.isolatedCores.push(c);
                         });
+                    } else {
+                        const roleId = this.benderToRole[benderName];
+                        if (roleId) {
+                            cores.forEach(cpu => {
+                                const cpuStr = String(cpu);
+                                if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                                if (!config.instances.Physical[cpuStr].includes(roleId)) {
+                                    config.instances.Physical[cpuStr].push(roleId);
+                                }
+                            });
+                        }
                     }
                 }
+                return;
             }
+            
+            // BENDER_NET section - skip, we got net numa from NETWORK
+            if (currentSection === 'bender_net') return;
         });
         
-        // Build geometry from NUMA ranges
-        const numaIds = Object.keys(numaRanges).sort((a, b) => parseInt(a) - parseInt(b));
-        
-        if (numaIds.length > 0) {
+        // Build geometry
+        // Priority: LSCPU data > NUMA ranges > fallback
+        if (Object.keys(lscpuData).length > 0) {
+            // Use LSCPU for precise socket/numa/l3 mapping
+            Object.entries(lscpuData).forEach(([cpu, data]) => {
+                const socketId = String(data.socket);
+                const numaId = String(data.numa);
+                const l3Id = String(data.l3);
+                
+                if (!config.geometry[socketId]) config.geometry[socketId] = {};
+                if (!config.geometry[socketId][numaId]) config.geometry[socketId][numaId] = {};
+                if (!config.geometry[socketId][numaId][l3Id]) config.geometry[socketId][numaId][l3Id] = [];
+                
+                config.geometry[socketId][numaId][l3Id].push(parseInt(cpu));
+            });
+            
+            // Sort cores within each L3
+            Object.values(config.geometry).forEach(socket => {
+                Object.values(socket).forEach(numa => {
+                    Object.keys(numa).forEach(l3 => {
+                        numa[l3].sort((a, b) => a - b);
+                    });
+                });
+            });
+        } else if (Object.keys(numaRanges).length > 0) {
+            // Use NUMA ranges, assume 2 NUMA per socket
+            const numaIds = Object.keys(numaRanges).sort((a, b) => parseInt(a) - parseInt(b));
             numaIds.forEach((numaId, idx) => {
-                const socketId = Math.floor(idx / 2); // 2 NUMA per socket
+                const socketId = String(Math.floor(parseInt(numaId) / 2));
                 if (!config.geometry[socketId]) config.geometry[socketId] = {};
                 config.geometry[socketId][numaId] = {
-                    '0': numaRanges[numaId]
+                    '0': numaRanges[numaId].sort((a, b) => a - b)
                 };
             });
         } else {
-            // Fallback: create from isolated cores range
-            const maxCore = Math.max(...config.isolatedCores, 95);
+            // Fallback: create 4 NUMA from max core
+            const maxCore = Math.max(
+                ...config.isolatedCores,
+                ...Object.keys(config.instances.Physical).map(c => parseInt(c)),
+                95
+            );
             const cpuCount = maxCore + 1;
             const coresPerNuma = Math.ceil(cpuCount / 4);
             
             for (let numa = 0; numa < 4; numa++) {
+                const socketId = String(Math.floor(numa / 2));
                 const start = numa * coresPerNuma;
                 const end = Math.min(start + coresPerNuma, cpuCount);
                 const cores = [];
                 for (let i = start; i < end; i++) cores.push(i);
                 
-                const socketId = Math.floor(numa / 2);
                 if (!config.geometry[socketId]) config.geometry[socketId] = {};
-                config.geometry[socketId][numa] = { '0': cores };
+                config.geometry[socketId][String(numa)] = { '0': cores };
             }
         }
         
@@ -1120,7 +1126,11 @@ const HFT = {
         // Collect all used roles for legend
         const usedRoles = new Set();
         
-        let html = '<div class="cmp-blueprint">';
+        // Count sockets
+        const numSockets = Object.keys(geom).length;
+        
+        let html = `<div class="cmp-info">Sockets: ${numSockets} | NUMAs: ${Object.values(geom).reduce((acc, s) => acc + Object.keys(s).length, 0)}</div>`;
+        html += '<div class="cmp-blueprint">';
         
         Object.keys(geom).sort((a, b) => parseInt(a) - parseInt(b)).forEach(socketId => {
             html += `<div class="cmp-socket">
@@ -1129,15 +1139,26 @@ const HFT = {
             
             Object.keys(geom[socketId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
                 const isNet = netNumas.has(String(numaId));
+                const l3Groups = geom[socketId][numaId];
+                const l3Count = Object.keys(l3Groups).length;
+                
                 html += `<div class="cmp-numa ${isNet ? 'is-net' : ''}">
                     <div class="cmp-numa-hdr">
                         <span>NUMA ${numaId}</span>
+                        ${l3Count > 1 ? `<span class="l3-count">${l3Count} L3</span>` : ''}
                         ${isNet ? '<span class="net-tag">NET</span>' : ''}
-                    </div>
-                    <div class="cmp-cores">`;
+                    </div>`;
                 
-                Object.keys(geom[socketId][numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
-                    geom[socketId][numaId][l3Id].forEach(cpu => {
+                // Render L3 groups
+                Object.keys(l3Groups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
+                    const hasMultipleL3 = l3Count > 1;
+                    html += `<div class="cmp-l3 ${hasMultipleL3 ? 'has-label' : ''}">`;
+                    if (hasMultipleL3) {
+                        html += `<div class="cmp-l3-label">L3 #${l3Id}</div>`;
+                    }
+                    html += '<div class="cmp-cores">';
+                    
+                    l3Groups[l3Id].forEach(cpu => {
                         const cpuStr = String(cpu);
                         const tags = [];
                         
@@ -1171,10 +1192,13 @@ const HFT = {
                             onmousemove="HFT.moveTooltip(event)"
                             onmouseleave="HFT.hideTooltip()">${cpu}</div>`;
                     });
+                    
+                    html += '</div></div>';
                 });
-                html += '</div></div>';
+                html += '</div>';
             });
             html += '</div></div>';
+        });
         });
         
         html += '</div>';
