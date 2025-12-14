@@ -1199,7 +1199,6 @@ const HFT = {
             });
             html += '</div></div>';
         });
-        });
         
         html += '</div>';
         
