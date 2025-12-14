@@ -100,7 +100,7 @@ node 0 size: 32000 MB
                 <div className="sidebar-content">
                     {/* Data Input */}
                     <section className="panel">
-                        <h3 className="panel-title">📥 Data Input</h3>
+                        <h3 className="panel-title">[DATA INPUT]</h3>
                         <textarea
                             className="input-area"
                             value={rawInput}
@@ -119,7 +119,7 @@ node 0 size: 32000 MB
 
                     {/* Paint Tools */}
                     <section className="panel">
-                        <h3 className="panel-title">🎨 Paint Tools</h3>
+                        <h3 className="panel-title">[PAINT TOOLS]</h3>
                         <div className="palette">
                             {roleGroups.map(group => (
                                 <div key={group.name} className="palette-group">

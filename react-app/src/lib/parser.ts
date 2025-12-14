@@ -353,12 +353,22 @@ export function parseYamlConfig(text: string): ParseResult | null {
 
     // Parse irqaffinity_cpus to get OS cores (adds to total core count)
     let irqAffinityCores: number[] = [];
+    let membindNodes: number[] = [];
+
     for (const line of lines) {
         const trimmed = line.trim();
+
+        // Parse irqaffinity_cpus
         const irqMatch = trimmed.match(/^irqaffinity_cpus:\s*(.+)/);
         if (irqMatch) {
             irqAffinityCores = parseCoreRange(irqMatch[1]);
-            break;
+        }
+
+        // Parse membind to determine NUMA count (e.g., membind: "0,1,2,3")
+        const membindMatch = trimmed.match(/^membind:\s*["']?([^"'\n]+)["']?/);
+        if (membindMatch) {
+            const membindVal = membindMatch[1].trim();
+            membindNodes = membindVal.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
         }
     }
 
@@ -367,18 +377,21 @@ export function parseYamlConfig(text: string): ParseResult | null {
     if (allKnownCores.length === 0) return null;
 
     const maxCore = Math.max(...allKnownCores);
-    const coresPerSocket = maxCore < 48 ? maxCore + 1 : Math.ceil((maxCore + 1) / 2);
-    const numSockets = Math.ceil((maxCore + 1) / coresPerSocket);
 
-    // Build simple geometry - include ALL cores from 0 to maxCore
-    for (let s = 0; s < numSockets; s++) {
-        result.geometry[s] = {};
-        result.geometry[s][s] = {};
-        result.geometry[s][s][s] = [];
+    // Determine NUMA count from membind (unique values)
+    const numNumas = membindNodes.length > 0 ? Math.max(...membindNodes) + 1 : 2;
+    const coresPerNuma = Math.ceil((maxCore + 1) / numNumas);
 
-        for (let c = s * coresPerSocket; c < Math.min((s + 1) * coresPerSocket, maxCore + 1); c++) {
-            result.geometry[s][s][s].push(c);
-            result.coreNumaMap[String(c)] = s;
+    // Build geometry based on NUMA count from membind
+    for (let n = 0; n < numNumas; n++) {
+        const socketId = Math.floor(n / 2); // 2 NUMAs per socket typically
+        if (!result.geometry[socketId]) result.geometry[socketId] = {};
+        result.geometry[socketId][n] = {};
+        result.geometry[socketId][n][n] = [];
+
+        for (let c = n * coresPerNuma; c < Math.min((n + 1) * coresPerNuma, maxCore + 1); c++) {
+            result.geometry[socketId][n][n].push(c);
+            result.coreNumaMap[String(c)] = n;
         }
     }
 

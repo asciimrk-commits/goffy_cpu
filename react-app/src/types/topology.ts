@@ -52,22 +52,33 @@ export interface ParsedConfig {
 }
 
 export const ROLES: Record<string, RoleDefinition> = {
-    sys_os: { id: 'sys_os', name: 'System (OS)', group: 'System', color: '#64748b' },
-    net_irq: { id: 'net_irq', name: 'IRQ (Network)', group: 'Network Stack', color: '#ef4444' },
-    udp: { id: 'udp', name: 'UDP Handler', group: 'Network Stack', color: '#f97316' },
-    trash: { id: 'trash', name: 'Trash', group: 'Network Stack', color: '#eab308' },
-    gateway: { id: 'gateway', name: 'Gateway', group: 'Gateways', color: '#f59e0b' },
-    isolated_robots: { id: 'isolated_robots', name: 'Isolated Robots', group: 'Trading Logic', color: '#10b981' },
-    pool1: { id: 'pool1', name: 'Robot Pool 1', group: 'Trading Logic', color: '#3b82f6' },
-    pool2: { id: 'pool2', name: 'Robot Pool 2', group: 'Trading Logic', color: '#6366f1' },
-    robot_default: { id: 'robot_default', name: 'Robot Default', group: 'Trading Logic', color: '#2ec4b6' },
-    ar: { id: 'ar', name: 'AllRobotsTh', group: 'Trading Logic', color: '#8b5cf6' },
-    allrobots_th: { id: 'allrobots_th', name: 'AllRobotsTh', group: 'Trading Logic', color: '#8b5cf6' },
-    rf: { id: 'rf', name: 'RemoteFormula', group: 'Analytics', color: '#d946ef' },
-    remoteformula: { id: 'remoteformula', name: 'RemoteFormula', group: 'Analytics', color: '#d946ef' },
-    formula: { id: 'formula', name: 'Formula', group: 'Analytics', color: '#ec4899' },
-    click: { id: 'click', name: 'ClickHouse', group: 'Analytics', color: '#14b8a6' },
-    isolated: { id: 'isolated', name: 'Isolated', group: 'Other', color: '#64748b' },
+    // SYSTEM - Gray palette
+    sys_os: { id: 'sys_os', name: 'System (OS)', group: 'System', color: '#5a6068' },
+
+    // NETWORK STACK - Red/Orange palette  
+    net_irq: { id: 'net_irq', name: 'IRQ (Network)', group: 'Network Stack', color: '#c04040' },
+    udp: { id: 'udp', name: 'UDP Handler', group: 'Network Stack', color: '#d06030' },
+    trash: { id: 'trash', name: 'Trash', group: 'Network Stack', color: '#b08020' },
+
+    // GATEWAYS - Amber/Yellow palette
+    gateway: { id: 'gateway', name: 'Gateway', group: 'Gateways', color: '#c09020' },
+
+    // TRADING LOGIC - Blue/Green/Purple palette (distinct)
+    isolated_robots: { id: 'isolated_robots', name: 'Isolated Robots', group: 'Trading Logic', color: '#208060' },
+    pool1: { id: 'pool1', name: 'Robot Pool 1', group: 'Trading Logic', color: '#3060a0' },
+    pool2: { id: 'pool2', name: 'Robot Pool 2', group: 'Trading Logic', color: '#4050b0' },
+    robot_default: { id: 'robot_default', name: 'Robot Default', group: 'Trading Logic', color: '#306080' },
+    ar: { id: 'ar', name: 'AllRobotsTh', group: 'Trading Logic', color: '#6050a0' },
+    allrobots_th: { id: 'allrobots_th', name: 'AllRobotsTh', group: 'Trading Logic', color: '#6050a0' },
+
+    // ANALYTICS - Purple/Pink palette
+    rf: { id: 'rf', name: 'RemoteFormula', group: 'Analytics', color: '#8040a0' },
+    remoteformula: { id: 'remoteformula', name: 'RemoteFormula', group: 'Analytics', color: '#8040a0' },
+    formula: { id: 'formula', name: 'Formula', group: 'Analytics', color: '#a04080' },
+    click: { id: 'click', name: 'ClickHouse', group: 'Analytics', color: '#207080' },
+
+    // OTHER
+    isolated: { id: 'isolated', name: 'Isolated', group: 'Other', color: '#404858' },
 };
 
 export const BENDER_TO_ROLE: Record<string, string> = {
