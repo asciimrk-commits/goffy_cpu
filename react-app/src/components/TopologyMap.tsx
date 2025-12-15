@@ -68,13 +68,13 @@ function Core({ cpuId, roles, ownerInstance, instanceColor, isIsolated, load, on
                     border: borderStyle,
                     cursor: activeTool ? 'pointer' : 'default',
                     position: 'relative',
-                    width: '30px',
-                    height: '30px',
+                    width: '44px',
+                    height: '44px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    borderRadius: '4px',
-                    fontSize: '10px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
                     fontWeight: 600,
                     color: '#fff',
                     transition: 'transform 0.1s, box-shadow 0.1s'
@@ -261,11 +261,11 @@ export function TopologyMap() {
                             SOCKET {socketId}
                         </div>
 
-                        {/* NUMAs in row */}
+                        {/* NUMAs in row with scroll if needed */}
                         <div style={{
                             display: 'flex',
                             flexWrap: 'wrap',
-                            gap: '0',
+                            gap: '12px',
                             padding: '12px'
                         }}>
                             {Object.entries(numaData).map(([numaId, l3Data]) => (
@@ -273,12 +273,12 @@ export function TopologyMap() {
                                     key={numaId}
                                     className="numa-section"
                                     style={{
-                                        border: '1px dashed var(--border-color)',
-                                        borderRadius: '10px',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '8px',
                                         padding: '12px',
-                                        background: 'rgba(100,100,150,0.05)',
-                                        flex: '1 1 auto',
-                                        minWidth: '200px'
+                                        background: 'rgba(30, 41, 59, 0.3)',
+                                        flex: '1 1 300px',
+                                        minWidth: '280px',
                                     }}
                                 >
                                     <div style={{
