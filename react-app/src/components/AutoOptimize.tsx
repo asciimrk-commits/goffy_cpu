@@ -9,6 +9,7 @@ interface Recommendation {
     role: string;
     rationale?: string;
     warning?: string | null;
+    instance?: string;
 }
 
 export function AutoOptimize() {
@@ -33,33 +34,60 @@ export function AutoOptimize() {
         const isolatedSet = new Set(isolatedCores.map(String));
         const coreLoads = useAppStore.getState().coreLoads;
 
-        // Helper: Get average load for cores
-        const getAvgLoad = (cores: string[]): number => {
+        // === Helper Functions ===
+        const getTotalLoad = (cores: string[]): number => {
             if (!cores?.length) return 0;
-            const total = cores.reduce((sum, c) => sum + (coreLoads[parseInt(c)] || 0), 0);
-            return total / cores.length;
+            return cores.reduce((sum, c) => sum + (coreLoads[parseInt(c)] || 0), 0);
         };
 
-
-
-        // Analyze topology - collect cores by NUMA and L3
+        // Analyze topology
         const byNuma: Record<string, number[]> = {};
-        const byNumaL3: Record<string, Record<string, number[]>> = {};
-
-        Object.entries(geometry).forEach(([socketId, numaData]) => {
+        Object.entries(geometry).forEach(([, numaData]) => {
             Object.entries(numaData).forEach(([numaId, l3Data]) => {
                 if (!byNuma[numaId]) byNuma[numaId] = [];
-                if (!byNumaL3[numaId]) byNumaL3[numaId] = {};
-
-                Object.entries(l3Data).forEach(([l3Id, cores]) => {
+                Object.entries(l3Data).forEach(([, cores]) => {
                     byNuma[numaId].push(...cores);
-                    const l3Key = `${socketId}-${numaId}-${l3Id}`;
-                    byNumaL3[numaId][l3Key] = cores;
                 });
             });
         });
 
-        // Current roles from existing config
+        const allCoresSorted = Object.values(byNuma).flat().sort((a, b) => a - b);
+        const totalCores = allCoresSorted.length;
+
+        // === Detect Instances from current config ===
+        const detectedInstances: string[] = [];
+        const instanceRoles: Record<string, Record<string, string[]>> = {};
+
+        // Check for named instances (beyond Physical)
+        const instanceEntries = Object.entries(instances) as [string, Record<string, string[]>][];
+        instanceEntries.forEach(([instName, cpuMap]) => {
+            if (instName !== 'Physical' && cpuMap && Object.keys(cpuMap).length > 0) {
+                detectedInstances.push(instName);
+                instanceRoles[instName] = {};
+                Object.entries(cpuMap).forEach(([cpu, tags]) => {
+                    if (Array.isArray(tags)) {
+                        tags.forEach((t: string) => {
+                            if (!instanceRoles[instName][t]) instanceRoles[instName][t] = [];
+                            instanceRoles[instName][t].push(cpu);
+                        });
+                    }
+                });
+            }
+        });
+
+        // If no named instances, use Physical as single instance
+        if (detectedInstances.length === 0) {
+            detectedInstances.push('Physical');
+            instanceRoles['Physical'] = {};
+            Object.entries(instances.Physical || {}).forEach(([cpu, tags]) => {
+                tags.forEach(t => {
+                    if (!instanceRoles['Physical'][t]) instanceRoles['Physical'][t] = [];
+                    instanceRoles['Physical'][t].push(cpu);
+                });
+            });
+        }
+
+        // Collect all roles from Physical for legacy support
         const currentRoles: Record<string, string[]> = {};
         Object.entries(instances.Physical || {}).forEach(([cpu, tags]) => {
             tags.forEach(t => {
@@ -68,328 +96,251 @@ export function AutoOptimize() {
             });
         });
 
-        const totalCores = Object.keys(byNuma).reduce((sum, n) => sum + byNuma[n].length, 0);
         const proposed: Record<string, string[]> = {};
         const recs: Recommendation[] = [];
+        const assignedCores = new Set<number>();
 
         const assignRole = (cpu: number | string, role: string) => {
-            const cpuStr = String(cpu);
+            const cpuNum = typeof cpu === 'string' ? parseInt(cpu) : cpu;
+            const cpuStr = String(cpuNum);
             if (!proposed[cpuStr]) proposed[cpuStr] = [];
             if (!proposed[cpuStr].includes(role)) proposed[cpuStr].push(role);
+            assignedCores.add(cpuNum);
         };
-        const isAssigned = (cpu: number | string) => (proposed[String(cpu)]?.length || 0) > 0;
+        const isAssigned = (cpu: number | string) => {
+            const cpuNum = typeof cpu === 'string' ? parseInt(cpu) : cpu;
+            return assignedCores.has(cpuNum);
+        };
 
+        // === PHASE 1: OS Cores (Shared) ===
+        // Formula: totalLoad / targetPerCore (25%)
+        // Consecutive from 0
+        const osCoresAvailable = allCoresSorted.filter(c => !isolatedSet.has(String(c)));
+        const osLoad = getTotalLoad(currentRoles['sys_os'] || osCoresAvailable.map(String));
+        let osNeeded = osLoad > 0
+            ? Math.max(1, Math.ceil(osLoad / 25))
+            : Math.max(1, Math.min(3, osCoresAvailable.length));
 
-        const netL3Pools = byNumaL3[netNuma] || {};
-        const netL3Keys = Object.keys(netL3Pools).sort();
+        osNeeded = Math.min(osNeeded, osCoresAvailable.length);
 
-        // === OS Cores ===
-        // KB: OS from 0 to N CONSECUTIVE, target ~20% load
-        const allCoresSorted = Object.values(byNuma).flat().sort((a, b) => a - b);
-        let osCores = allCoresSorted.filter(c => !isolatedSet.has(String(c)));
-
-        if (osCores.length === 0) {
-            // Fallback: use existing or first cores
-            osCores = currentRoles['sys_os']?.map(Number) || allCoresSorted.slice(0, 2);
-        }
-
-        // Calculate OS needed based on 20% load target
-        const osLoad = getAvgLoad(currentRoles['sys_os'] || osCores.map(String));
-        const osCoreCount = currentRoles['sys_os']?.length || osCores.length;
-        let osNeeded: number;
-
-        if (osLoad > 0) {
-            // Formula: current_cores * current_load% / target_20%
-            osNeeded = Math.max(1, Math.ceil(osLoad * osCoreCount / 20));
-        } else {
-            // No load data: use conservative estimate
-            if (totalCores >= 100) osNeeded = 4;
-            else if (totalCores <= 12) osNeeded = 1;
-            else osNeeded = 2;
-        }
-        osNeeded = Math.min(osNeeded, osCores.length);
-
-        // Assign consecutive OS cores starting from 0
-        const assignedOsCores = osCores.slice(0, osNeeded);
+        const assignedOsCores = osCoresAvailable.slice(0, osNeeded);
         assignedOsCores.forEach(c => assignRole(c, 'sys_os'));
+
+        const osLoadPerCore = assignedOsCores.length > 0 ? osLoad / assignedOsCores.length : 0;
         recs.push({
-            title: '[OS]',
+            title: '[OS] Shared',
             cores: assignedOsCores,
-            description: `${assignedOsCores.length} ядер (0-${assignedOsCores.length - 1})`,
+            description: `${assignedOsCores.length} ядер (${osLoad.toFixed(0)}% → ${osLoadPerCore.toFixed(0)}%/core)`,
             role: 'sys_os',
-            rationale: `~${osLoad.toFixed(0)}% → 20% target`,
+            rationale: 'От 0 последовательно, target 25%',
         });
 
-        // Find service L3 (containing OS cores)
-        let serviceL3: string | null = null;
-        for (const l3 of netL3Keys) {
-            if (netL3Pools[l3].some(c => assignedOsCores.includes(c))) {
-                serviceL3 = l3;
-                break;
-            }
+        // === PHASE 2: IRQ (Shared) ===
+        // Formula: 1 IRQ per 4 gateways across ALL instances
+        let totalGateways = 0;
+        detectedInstances.forEach(inst => {
+            totalGateways += (instanceRoles[inst]?.['gateway']?.length || 0);
+        });
+        if (totalGateways === 0) totalGateways = currentRoles['gateway']?.length || 1;
+
+        const neededIrq = Math.min(6, Math.max(1, Math.ceil(totalGateways / 4)));
+
+        const netNumaCores = byNuma[netNuma] || [];
+        const irqCandidates = netNumaCores
+            .filter(c => isolatedSet.has(String(c)) && !isAssigned(c))
+            .sort((a, b) => a - b);
+
+        const irqCores: number[] = [];
+        for (let i = 0; i < neededIrq && i < irqCandidates.length; i++) {
+            const c = irqCandidates[i];
+            assignRole(c, 'net_irq');
+            irqCores.push(c);
         }
-        if (!serviceL3 && netL3Keys.length > 0) serviceL3 = netL3Keys[0];
 
-        const workL3Keys = netL3Keys.filter(k => k !== serviceL3);
-        if (workL3Keys.length === 0 && serviceL3) workL3Keys.push(serviceL3);
-
-        // === Service cores pool ===
-        const getServiceCandidates = (): number[] => {
-            let candidates: number[] = [];
-            if (serviceL3) {
-                candidates = netL3Pools[serviceL3]
-                    .filter(c => isolatedSet.has(String(c)) && !isAssigned(c))
-                    .sort((a, b) => a - b);
-            }
-            if (candidates.length === 0) {
-                for (const l3 of workL3Keys) {
-                    const extra = netL3Pools[l3]
-                        .filter(c => isolatedSet.has(String(c)) && !isAssigned(c))
-                        .sort((a, b) => a - b);
-                    candidates.push(...extra);
-                }
-            }
-            return candidates;
-        };
-
-        const servicePool = getServiceCandidates();
-        let svcIdx = 0;
-        const getSvc = () => svcIdx < servicePool.length ? servicePool[svcIdx++] : null;
-
-        // === Trash + ClickHouse (NOT AR!) ===
-        // KB: Trash + RF + ClickHouse on 1 core, RF can also go to AR
-        const trashCore = getSvc();
-        if (trashCore !== null) {
-            assignRole(trashCore, 'trash');
-            assignRole(trashCore, 'click');
-            // RF will be added to AR if available, else to trash later
+        if (irqCores.length > 0) {
             recs.push({
-                title: '[TRASH+CLICK]',
-                cores: [trashCore],
-                description: `Ядро ${trashCore}`,
-                role: 'trash',
-                rationale: '"Грязный" L3',
+                title: '[IRQ] Shared',
+                cores: irqCores,
+                description: `${irqCores.length} ядер (${totalGateways} gw total)`,
+                role: 'net_irq',
+                rationale: '1 IRQ / 4 gateways',
             });
         }
 
-        // === UDP Handler ===
-        // KB: Separate core if >10k pps, else can share with trash
-        const hasUdpInInput = (currentRoles['udp']?.length || 0) > 0;
-        let udpCore: number | null = null;
+        // === PHASE 3: Partition Cores Between Instances ===
+        // First, divide available cores equally between instances
+        const availableForInstances = allCoresSorted
+            .filter(c => isolatedSet.has(String(c)) && !isAssigned(c))
+            .sort((a, b) => a - b);
 
-        if (hasUdpInInput) {
-            udpCore = getSvc();
+        const coresPerInstance = Math.floor(availableForInstances.length / detectedInstances.length);
+        const instanceCorePool: Record<string, number[]> = {};
+
+        detectedInstances.forEach((instName, idx) => {
+            const startIdx = idx * coresPerInstance;
+            const endIdx = idx === detectedInstances.length - 1
+                ? availableForInstances.length  // Last instance gets remaining
+                : startIdx + coresPerInstance;
+            instanceCorePool[instName] = availableForInstances.slice(startIdx, endIdx);
+        });
+
+        // === PHASE 4: Per-Instance Allocation ===
+        for (const instName of detectedInstances) {
+            const instRoles = instanceRoles[instName] || currentRoles;
+            const instCandidates = [...instanceCorePool[instName]];
+
+            let instIdx = 0;
+            const getInstCore = () => {
+                while (instIdx < instCandidates.length) {
+                    const c = instCandidates[instIdx++];
+                    if (!isAssigned(c)) return c;
+                }
+                return null;
+            };
+
+            // 3.1 Trash + ClickHouse
+            const trashCore = getInstCore();
+            if (trashCore !== null) {
+                assignRole(trashCore, 'trash');
+                assignRole(trashCore, 'click');
+                recs.push({
+                    title: `[TRASH+CLICK] ${instName}`,
+                    cores: [trashCore],
+                    description: `Ядро ${trashCore}`,
+                    role: 'trash',
+                    rationale: '"Грязный" L3',
+                    instance: instName,
+                });
+            }
+
+            // 3.2 UDP (mandatory)
+            const udpCore = getInstCore();
             if (udpCore !== null) {
                 assignRole(udpCore, 'udp');
                 recs.push({
-                    title: '[UDP]',
+                    title: `[UDP] ${instName}`,
                     cores: [udpCore],
                     description: `Ядро ${udpCore}`,
                     role: 'udp',
-                    rationale: 'Отдельное ядро',
-                });
-            }
-        } else if (trashCore !== null) {
-            // Low traffic: share with trash
-            assignRole(trashCore, 'udp');
-        }
-
-        // === AR + RF + Formula (NEVER with Trash!) ===
-        // KB: AR must not be with Trash! RF can be with AR or Trash
-        const arCore = getSvc();
-        if (arCore !== null) {
-            assignRole(arCore, 'ar');
-            assignRole(arCore, 'rf');  // RF prefers AR
-            assignRole(arCore, 'formula');
-            recs.push({
-                title: '[AR+RF+FORMULA]',
-                cores: [arCore],
-                description: `Ядро ${arCore}`,
-                role: 'ar',
-                rationale: 'НЕ на Trash!',
-            });
-        } else if (trashCore !== null) {
-            // Fallback: RF on trash if no AR core
-            assignRole(trashCore, 'rf');
-        }
-
-        // === IRQ ===
-        // KB: 1 IRQ per 4 gateways, min 1, max 6
-        const gwCount = currentRoles['gateway']?.length || 1;
-        const neededIrq = Math.min(6, Math.max(1, Math.ceil(gwCount / 4)));
-
-        // === Gateways ===
-        // KB: Target ~20% load
-        const gwLoad = getAvgLoad(currentRoles['gateway']);
-        const gwCoreCount = currentRoles['gateway']?.length || 1;
-        const neededGw = gwLoad > 0
-            ? Math.max(1, Math.ceil(gwLoad * gwCoreCount / 20))
-            : Math.max(1, gwCoreCount);
-
-        // Build work pool
-        const workPool: Record<string, number[]> = {};
-        workL3Keys.forEach(l3 => {
-            workPool[l3] = (netL3Pools[l3] || [])
-                .filter(c => isolatedSet.has(String(c)) && !isAssigned(c))
-                .sort((a, b) => a - b);
-        });
-
-        // IRQ allocation
-        const irqCores: number[] = [];
-        let irqN = neededIrq, l3i = 0;
-        while (irqN > 0 && l3i < neededIrq * workL3Keys.length) {
-            const l3 = workL3Keys[l3i % workL3Keys.length];
-            if (workPool[l3]?.length > 0) {
-                const c = workPool[l3].shift()!;
-                assignRole(c, 'net_irq');
-                irqCores.push(c);
-                irqN--;
-            }
-            l3i++;
-        }
-        if (irqCores.length > 0) {
-            recs.push({
-                title: '[IRQ]',
-                cores: irqCores,
-                description: `${irqCores.length} ядер`,
-                role: 'net_irq',
-                rationale: 'Network interrupts',
-            });
-        }
-
-        // Gateways allocation
-        const gwCores: number[] = [];
-        let gwN = neededGw;
-        l3i = 0;
-        while (gwN > 0 && l3i < neededGw * workL3Keys.length) {
-            const l3 = workL3Keys[l3i % workL3Keys.length];
-            if (workPool[l3]?.length > 0) {
-                const c = workPool[l3].shift()!;
-                assignRole(c, 'gateway');
-                gwCores.push(c);
-                gwN--;
-            }
-            l3i++;
-        }
-        if (gwCores.length > 0) {
-            recs.push({
-                title: '[GATEWAYS]',
-                cores: gwCores,
-                description: `${gwCores.length} ядер`,
-                role: 'gateway',
-                rationale: 'Critical path',
-                warning: gwCores.length < neededGw ? `Нужно ${neededGw}!` : null,
-            });
-        }
-
-        // === Isolated Robots (remaining in net NUMA) ===
-        const isoRobots: number[] = [];
-        workL3Keys.forEach(l3 => {
-            (workPool[l3] || []).forEach(c => {
-                if (!isAssigned(c)) isoRobots.push(c);
-            });
-        });
-        const MIN_ISO = 4;
-        if (isoRobots.length >= MIN_ISO) {
-            isoRobots.forEach(c => assignRole(c, 'isolated_robots'));
-            recs.push({
-                title: '[ISO ROBOTS]',
-                cores: isoRobots,
-                description: `${isoRobots.length} ядер`,
-                role: 'isolated_robots',
-                rationale: 'ЛУЧШИЙ! Tier 1',
-            });
-        }
-
-        // === Robot Pools (other NUMAs) ===
-        const otherNumas = Object.keys(byNuma)
-            .filter(n => n !== netNuma)
-            .sort((a, b) => parseInt(a) - parseInt(b));
-
-        const pool1: number[] = [];
-        const pool2: number[] = [];
-
-        if (otherNumas.length >= 1) {
-            // If isolated robots < MIN_ISO, move to pool1
-            if (isoRobots.length > 0 && isoRobots.length < MIN_ISO) {
-                isoRobots.forEach(c => {
-                    assignRole(c, 'pool1');
-                    pool1.push(c);
+                    rationale: 'Обязательный',
+                    instance: instName,
                 });
             }
 
-            const n1cores = (byNuma[otherNumas[0]] || [])
-                .filter(c => isolatedSet.has(String(c)) && !isAssigned(c));
-            n1cores.forEach(c => {
-                assignRole(c, 'pool1');
-                pool1.push(c);
-            });
-
-            if (pool1.length > 0) {
+            // 3.3 AR + RF + Formula (NOT on trash!)
+            const arCore = getInstCore();
+            if (arCore !== null) {
+                assignRole(arCore, 'ar');
+                assignRole(arCore, 'rf');
+                assignRole(arCore, 'formula');
                 recs.push({
-                    title: '[POOL 1]',
-                    cores: pool1,
-                    description: `NUMA ${otherNumas[0]}: ${pool1.length}`,
-                    role: 'pool1',
-                    rationale: 'Tier 2',
+                    title: `[AR+RF+FORMULA] ${instName}`,
+                    cores: [arCore],
+                    description: `Ядро ${arCore}`,
+                    role: 'ar',
+                    rationale: 'НЕ на Trash!',
+                    instance: instName,
                 });
             }
-        }
 
-        if (otherNumas.length >= 2) {
-            const n2cores = (byNuma[otherNumas[1]] || [])
-                .filter(c => isolatedSet.has(String(c)) && !isAssigned(c));
-            n2cores.forEach(c => {
-                assignRole(c, 'pool2');
-                pool2.push(c);
-            });
+            // 3.4 Gateways (load-based, target 25%)
+            const gwLoad = getTotalLoad(instRoles['gateway'] || []);
+            const gwCount = instRoles['gateway']?.length || 1;
+            const neededGw = gwLoad > 0
+                ? Math.max(1, Math.ceil(gwLoad / 25))
+                : gwCount;
 
-            if (pool2.length > 0) {
-                recs.push({
-                    title: '[POOL 2]',
-                    cores: pool2,
-                    description: `NUMA ${otherNumas[1]}: ${pool2.length}`,
-                    role: 'pool2',
-                    rationale: 'Tier 3',
-                });
-            }
-        }
-
-        // Default robots (remaining isolated cores not assigned)
-        const defCores: number[] = [];
-        Object.keys(byNuma).forEach(numa => {
-            byNuma[numa].forEach(c => {
-                if (isolatedSet.has(String(c)) && !isAssigned(c)) {
-                    assignRole(c, 'robot_default');
-                    defCores.push(c);
+            const gwCores: number[] = [];
+            for (let i = 0; i < neededGw; i++) {
+                const c = getInstCore();
+                if (c !== null) {
+                    assignRole(c, 'gateway');
+                    gwCores.push(c);
                 }
-            });
-        });
-        if (defCores.length > 0) {
+            }
+
+            if (gwCores.length > 0) {
+                const newLoad = gwCores.length > 0 ? gwLoad / gwCores.length : 0;
+                recs.push({
+                    title: `[GATEWAYS] ${instName}`,
+                    cores: gwCores,
+                    description: `${gwCores.length} ядер (${gwLoad.toFixed(0)}% → ${newLoad.toFixed(0)}%/core)`,
+                    role: 'gateway',
+                    rationale: 'Target 25%',
+                    warning: gwCores.length < neededGw ? `Нужно ${neededGw}!` : null,
+                    instance: instName,
+                });
+            }
+
+            // 3.5 Robots = ALL remaining instance cores
+            const robotCores: number[] = [];
+            let c = getInstCore();
+            while (c !== null) {
+                assignRole(c, 'robot_default');
+                robotCores.push(c);
+                c = getInstCore();
+            }
+
+            if (robotCores.length > 0) {
+                const robotLoad = getTotalLoad(instRoles['robot_default'] || []);
+                const robotLoadPerCore = robotCores.length > 0 ? robotLoad / robotCores.length : 0;
+                recs.push({
+                    title: `[ROBOTS] ${instName}`,
+                    cores: robotCores,
+                    description: `${robotCores.length} ядер`,
+                    role: 'robot_default',
+                    rationale: robotLoad > 0 ? `~${robotLoadPerCore.toFixed(0)}%/core` : 'Оставшиеся',
+                    instance: instName,
+                });
+            } else {
+                recs.push({
+                    title: `[WARNING] ${instName}`,
+                    cores: [],
+                    description: 'НЕТ РОБОТОВ!',
+                    role: 'robot_default',
+                    rationale: 'Критично!',
+                    warning: 'Trading не будет работать!',
+                    instance: instName,
+                });
+            }
+        }
+
+        // === PHASE 5: Fill All Remaining Cores ===
+        // Non-isolated remaining → OS
+        const remainingNonIsolated = allCoresSorted.filter(c =>
+            !isolatedSet.has(String(c)) && !isAssigned(c)
+        );
+        if (remainingNonIsolated.length > 0) {
+            remainingNonIsolated.forEach(c => assignRole(c, 'sys_os'));
             recs.push({
-                title: '[DEFAULT]',
-                cores: defCores,
-                description: `${defCores.length} ядер`,
-                role: 'robot_default',
-                rationale: 'Fallback',
+                title: '[OS] Additional',
+                cores: remainingNonIsolated,
+                description: `${remainingNonIsolated.length} ядер`,
+                role: 'sys_os',
+                rationale: 'Не изолированы → OS',
             });
         }
 
-        // Check for minimum robots
-        const allRobotCores = [...isoRobots, ...pool1, ...pool2, ...defCores];
-        if (allRobotCores.length === 0) {
+        // Isolated remaining → Robots
+        const remainingIsolated = allCoresSorted.filter(c =>
+            isolatedSet.has(String(c)) && !isAssigned(c)
+        );
+        if (remainingIsolated.length > 0) {
+            remainingIsolated.forEach(c => assignRole(c, 'robot_default'));
             recs.push({
-                title: '[WARNING]',
-                cores: [],
-                description: 'НЕТ РОБОТОВ!',
+                title: '[REMAINING] → Robots',
+                cores: remainingIsolated,
+                description: `${remainingIsolated.length} ядер`,
                 role: 'robot_default',
-                rationale: 'Trading не будет работать!',
-                warning: 'Критично!',
+                rationale: 'Нет пустых ядер',
             });
         }
+
+        // === Summary ===
+        const assignedCount = assignedCores.size;
 
         setRecommendations(recs);
-        setResult(`Generated ${recs.length} recommendations`);
+        setResult(`${detectedInstances.length} instance(s): ${detectedInstances.join(', ')} | ${assignedCount}/${totalCores} cores`);
     };
 
     const applyRecommendations = () => {
@@ -401,7 +352,7 @@ export function AutoOptimize() {
                 if (!proposed[cpuStr].includes(rec.role)) {
                     proposed[cpuStr].push(rec.role);
                 }
-                // Special case: trash gets click (NOT rf!)
+                // Special case: trash gets click
                 if (rec.role === 'trash') {
                     if (!proposed[cpuStr].includes('click')) proposed[cpuStr].push('click');
                 }
@@ -448,17 +399,19 @@ export function AutoOptimize() {
                             <p>{rec.description}</p>
                             {rec.rationale && <p className="rationale">{rec.rationale}</p>}
                             {rec.warning && <p className="warning-text">[!] {rec.warning}</p>}
-                            <div className="recommend-cores">
-                                {rec.cores.map(c => (
-                                    <span
-                                        key={c}
-                                        className="recommend-core"
-                                        style={{ backgroundColor: ROLES[rec.role]?.color || '#64748b' }}
-                                    >
-                                        {c}
-                                    </span>
-                                ))}
-                            </div>
+                            {rec.cores.length > 0 && (
+                                <div className="recommend-cores">
+                                    {rec.cores.map(c => (
+                                        <span
+                                            key={c}
+                                            className="recommend-core"
+                                            style={{ backgroundColor: ROLES[rec.role]?.color || '#64748b' }}
+                                        >
+                                            {c}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>

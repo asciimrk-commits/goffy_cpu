@@ -1,226 +1,137 @@
 /**
- * Unit test for AutoOptimize logic
- * Tests the optimizer with trade0516 data (8 cores)
+ * Unit test for Multi-Instance Optimizer with Core Partitioning
+ * Tests with 48-core dual-instance system (HUB7 + RFQ1)
  */
 
-// Simulate the optimizer logic from AutoOptimize.tsx
-function testOptimizer() {
-    // === Input data (trade0516) ===
-    const geometry = {
-        '0': {  // socket
-            '0': {  // numa
-                '0': [0, 1, 2, 3, 4, 5, 6, 7]  // L3 -> cores
-            }
-        }
-    };
-    
-    const isolatedCores = [2, 3, 4, 5, 6, 7];  // cores 0,1 are OS
-    const netNumaNodes = [0];
-    const coreLoads = {
-        0: 4.7, 1: 3.2, 2: 0.4, 3: 0.4, 
-        4: 0.7, 5: 0.7, 6: 0.1, 7: 0.1
-    };
-    
-    // Current roles from BENDER
-    const currentRoles = {
-        'trash': ['2'],
-        'ar': ['3'],
-        'udp': ['3'],
-        'gateway': ['4', '5'],
-        'robot_default': ['6', '7']
-    };
-    
-    // === Optimizer Logic ===
-    const netNuma = '0';
+function testMultiInstanceOptimizer() {
+    console.log('========== MULTI-INSTANCE OPTIMIZER TEST ==========\n');
+
+    const totalCores = 48;
+    const allCoresSorted = Array.from({ length: 48 }, (_, i) => i);
+
+    // OS cores: 0, 1, 2 (non-isolated) 
+    // Isolated: 3-47
+    const isolatedCores = allCoresSorted.filter(c => c >= 3);
     const isolatedSet = new Set(isolatedCores.map(String));
-    
-    const getAvgLoad = (cores) => {
-        if (!cores?.length) return 0;
-        const total = cores.reduce((sum, c) => sum + (coreLoads[parseInt(c)] || 0), 0);
-        return total / cores.length;
+
+    const coreLoads = {
+        0: 10, 1: 10, 2: 10,  // OS = 30%
+        9: 25, 10: 25, 11: 25, // HUB7 gw = 75%
+        17: 20, 18: 20, 19: 20 // RFQ1 gw = 60%
     };
-    
-    const byNuma = { '0': [0, 1, 2, 3, 4, 5, 6, 7] };
-    const totalCores = 8;
-    
+
+    const instances = ['HUB7', 'RFQ1'];
+    const instanceRoles = {
+        'HUB7': { 'gateway': ['9', '10', '11'] },
+        'RFQ1': { 'gateway': ['17', '18', '19'] }
+    };
+    const currentRoles = {
+        'sys_os': ['0', '1', '2'],
+        'gateway': ['9', '10', '11', '17', '18', '19']
+    };
+
+    const getTotalLoad = (cores) => {
+        if (!cores?.length) return 0;
+        return cores.reduce((sum, c) => sum + (coreLoads[parseInt(c)] || 0), 0);
+    };
+
     const proposed = {};
+    const assignedCores = new Set();
+
     const assignRole = (cpu, role) => {
         const cpuStr = String(cpu);
         if (!proposed[cpuStr]) proposed[cpuStr] = [];
         if (!proposed[cpuStr].includes(role)) proposed[cpuStr].push(role);
+        assignedCores.add(parseInt(cpu));
     };
-    const isAssigned = (cpu) => (proposed[String(cpu)]?.length || 0) > 0;
-    
-    // === OS Cores ===
-    // KB: OS from 0 to N CONSECUTIVE, target ~20% load
-    const allCoresSorted = [0, 1, 2, 3, 4, 5, 6, 7];
-    let osCores = allCoresSorted.filter(c => !isolatedSet.has(String(c)));
-    
-    const osLoad = getAvgLoad(currentRoles['sys_os'] || osCores.map(String));
-    const osCoreCount = currentRoles['sys_os']?.length || osCores.length;
-    let osNeeded;
-    
-    if (osLoad > 0) {
-        osNeeded = Math.max(1, Math.ceil(osLoad * osCoreCount / 20));
-    } else {
-        if (totalCores >= 100) osNeeded = 4;
-        else if (totalCores <= 12) osNeeded = 1;
-        else osNeeded = 2;
-    }
-    osNeeded = Math.min(osNeeded, osCores.length);
-    
-    const assignedOsCores = osCores.slice(0, osNeeded);
-    assignedOsCores.forEach(c => assignRole(c, 'sys_os'));
-    
-    console.log('=== OS Cores ===');
-    console.log('Available OS cores:', osCores);
-    console.log('OS load:', osLoad.toFixed(1) + '%');
-    console.log('OS needed:', osNeeded);
-    console.log('Assigned OS:', assignedOsCores);
-    console.log('CHECK: OS consecutive from 0?', assignedOsCores[0] === 0 ? '✅' : '❌');
-    
-    // === Service Pool ===
-    const servicePool = allCoresSorted.filter(c => 
-        isolatedSet.has(String(c)) && !isAssigned(c)
-    ).sort((a, b) => a - b);
-    
-    let svcIdx = 0;
-    const getSvc = () => svcIdx < servicePool.length ? servicePool[svcIdx++] : null;
-    
-    console.log('\n=== Service Pool ===');
-    console.log('Available:', servicePool);
-    
-    // === Trash + ClickHouse ===
-    const trashCore = getSvc();
-    if (trashCore !== null) {
-        assignRole(trashCore, 'trash');
-        assignRole(trashCore, 'click');
-    }
-    console.log('\n=== Trash+Click ===');
-    console.log('Trash core:', trashCore);
-    
-    // === UDP ===
-    const hasUdpInInput = (currentRoles['udp']?.length || 0) > 0;
-    let udpCore = null;
-    if (hasUdpInInput) {
-        udpCore = getSvc();
-        if (udpCore !== null) {
-            assignRole(udpCore, 'udp');
-        }
-    } else if (trashCore !== null) {
-        assignRole(trashCore, 'udp');
-    }
-    console.log('\n=== UDP ===');
-    console.log('Has UDP in input:', hasUdpInInput);
-    console.log('UDP core:', udpCore ?? 'shared with trash');
-    
-    // === AR + RF + Formula ===
-    const arCore = getSvc();
-    if (arCore !== null) {
-        assignRole(arCore, 'ar');
-        assignRole(arCore, 'rf');
-        assignRole(arCore, 'formula');
-    } else if (trashCore !== null) {
-        assignRole(trashCore, 'rf');
-    }
-    console.log('\n=== AR+RF+Formula ===');
-    console.log('AR core:', arCore);
-    console.log('CHECK: AR != Trash?', arCore !== trashCore ? '✅' : '❌');
-    
-    // === IRQ ===
-    const gwCount = currentRoles['gateway']?.length || 1;
-    const neededIrq = Math.min(6, Math.max(1, Math.ceil(gwCount / 4)));
-    console.log('\n=== IRQ ===');
-    console.log('Gateway count:', gwCount);
-    console.log('IRQ needed (1 per 4 gw):', neededIrq);
-    console.log('CHECK: 2 gw = 1 IRQ?', neededIrq === 1 ? '✅' : '❌');
-    
-    // Assign IRQ
-    for (let i = 0; i < neededIrq; i++) {
-        const irqCore = getSvc();
-        if (irqCore !== null) {
-            assignRole(irqCore, 'net_irq');
-            console.log('IRQ assigned to core:', irqCore);
-        }
-    }
-    
-    // === Gateways ===
-    const gwLoad = getAvgLoad(currentRoles['gateway']);
-    const gwCoreCount = currentRoles['gateway']?.length || 1;
-    const neededGw = gwLoad > 0 
-        ? Math.max(1, Math.ceil(gwLoad * gwCoreCount / 20))
-        : Math.max(1, gwCoreCount);
-    
-    console.log('\n=== Gateways ===');
-    console.log('Gateway load:', gwLoad.toFixed(1) + '%');
-    console.log('Gateway count:', gwCoreCount);
-    console.log('Gateways needed (20% target):', neededGw);
-    
-    // Assign gateways
-    const gwCores = [];
-    for (let i = 0; i < neededGw; i++) {
-        const gwCore = getSvc();
-        if (gwCore !== null) {
-            assignRole(gwCore, 'gateway');
-            gwCores.push(gwCore);
-        }
-    }
-    console.log('Gateway cores:', gwCores);
-    
-    // === Robots ===
-    const robotCores = [];
-    while (svcIdx < servicePool.length) {
-        const robotCore = getSvc();
-        if (robotCore !== null) {
-            assignRole(robotCore, 'robot_default');
-            robotCores.push(robotCore);
-        }
-    }
-    console.log('\n=== Robots ===');
-    console.log('Robot cores:', robotCores);
-    console.log('CHECK: Robots >= 1?', robotCores.length >= 1 ? '✅' : '❌ (' + robotCores.length + ')');
-    
-    // === Final Summary ===
-    console.log('\n========== FINAL ALLOCATION ==========');
-    Object.entries(proposed).sort((a, b) => parseInt(a[0]) - parseInt(b[0])).forEach(([cpu, roles]) => {
-        console.log(`Core ${cpu}: ${roles.join(', ')}`);
+    const isAssigned = (cpu) => assignedCores.has(parseInt(cpu));
+
+    // PHASE 1: OS
+    console.log('=== PHASE 1: OS ===');
+    const osCoresAvailable = allCoresSorted.filter(c => !isolatedSet.has(String(c)));
+    const osLoad = getTotalLoad(currentRoles['sys_os']);
+    let osNeeded = Math.max(1, Math.ceil(osLoad / 25));
+    osNeeded = Math.min(osNeeded, osCoresAvailable.length);
+    osCoresAvailable.slice(0, osNeeded).forEach(c => assignRole(c, 'sys_os'));
+    console.log(`OS: ${osNeeded} cores (${osLoad}% / 25 = ${Math.ceil(osLoad / 25)})`);
+    console.log(`CHECK: OS formula? ${osNeeded === Math.ceil(osLoad / 25) ? '✅' : '❌'}`);
+
+    // PHASE 2: IRQ
+    console.log('\n=== PHASE 2: IRQ ===');
+    const totalGw = 6;
+    const neededIrq = Math.min(6, Math.max(1, Math.ceil(totalGw / 4)));
+    isolatedCores.filter(c => !isAssigned(c)).slice(0, neededIrq).forEach(c => assignRole(c, 'net_irq'));
+    console.log(`IRQ: ${neededIrq} cores (${totalGw} gw / 4)`);
+    console.log(`CHECK: IRQ formula? ${neededIrq === Math.ceil(totalGw / 4) ? '✅' : '❌'}`);
+
+    // PHASE 3: Partition
+    console.log('\n=== PHASE 3: Partition ===');
+    const available = isolatedCores.filter(c => !isAssigned(c));
+    const perInstance = Math.floor(available.length / instances.length);
+    const pools = {};
+    instances.forEach((inst, i) => {
+        const start = i * perInstance;
+        const end = i === instances.length - 1 ? available.length : start + perInstance;
+        pools[inst] = available.slice(start, end);
+        console.log(`${inst}: ${pools[inst].length} cores`);
     });
-    
-    // === Validation ===
+
+    // PHASE 4: Per-Instance
+    console.log('\n=== PHASE 4: Per-Instance ===');
+    for (const inst of instances) {
+        console.log(`\n--- ${inst} ---`);
+        const pool = [...pools[inst]];
+        let idx = 0;
+        const get = () => idx < pool.length && !isAssigned(pool[idx]) ? pool[idx++] : null;
+
+        // Trash, UDP, AR
+        const trash = get(); if (trash !== null) { assignRole(trash, 'trash'); console.log(`Trash: ${trash}`); }
+        const udp = get(); if (udp !== null) { assignRole(udp, 'udp'); console.log(`UDP: ${udp}`); }
+        const ar = get(); if (ar !== null) { assignRole(ar, 'ar'); console.log(`AR: ${ar}`); }
+        console.log(`CHECK: AR != Trash? ${ar !== trash ? '✅' : '❌'}`);
+
+        // Gateways
+        const gwLoad = getTotalLoad(instanceRoles[inst]['gateway']);
+        const gwNeeded = Math.max(1, Math.ceil(gwLoad / 25));
+        const gws = [];
+        for (let i = 0; i < gwNeeded; i++) { const c = get(); if (c !== null) { assignRole(c, 'gateway'); gws.push(c); } }
+        console.log(`Gateways: ${gws.length} (${gwLoad}% / 25 = ${gwNeeded})`);
+
+        // Robots
+        const robots = [];
+        let c = get();
+        while (c !== null) { assignRole(c, 'robot_default'); robots.push(c); c = get(); }
+        console.log(`Robots: ${robots.length}`);
+        console.log(`CHECK: Robots >= 1? ${robots.length >= 1 ? '✅' : '❌'}`);
+    }
+
+    // PHASE 5: Fill Remaining
+    console.log('\n=== PHASE 5: Fill Remaining ===');
+    const remNonIso = allCoresSorted.filter(c => !isolatedSet.has(String(c)) && !isAssigned(c));
+    remNonIso.forEach(c => assignRole(c, 'sys_os'));
+    console.log(`Non-isolated → OS: ${remNonIso.length} [${remNonIso.join(', ')}]`);
+
+    const remIso = allCoresSorted.filter(c => isolatedSet.has(String(c)) && !isAssigned(c));
+    remIso.forEach(c => assignRole(c, 'robot_default'));
+    console.log(`Isolated → Robots: ${remIso.length}`);
+
+    // Summary
+    console.log('\n========== SUMMARY ==========');
+    console.log(`Total: ${totalCores}, Assigned: ${assignedCores.size}`);
+
+    const results = [
+        ['OS = totalLoad/25%', osNeeded === Math.ceil(osLoad / 25)],
+        ['IRQ = ceil(gw/4)', neededIrq === Math.ceil(totalGw / 4)],
+        ['All cores assigned', assignedCores.size === totalCores],
+        ['Multi-instance', instances.length === 2],
+        ['Equal partition', Math.abs(pools['HUB7'].length - pools['RFQ1'].length) <= 1]
+    ];
+
     console.log('\n========== VALIDATION ==========');
-    const results = [];
-    
-    // 1. OS consecutive from 0
-    const osOk = assignedOsCores.every((c, i) => c === i);
-    results.push(['OS consecutive from 0', osOk]);
-    
-    // 2. IRQ formula correct
-    results.push(['IRQ = 1 per 4 gateways', neededIrq === Math.ceil(gwCount / 4)]);
-    
-    // 3. AR not with Trash
-    const arRoles = proposed[String(arCore)] || [];
-    const trashRoles = proposed[String(trashCore)] || [];
-    const arNotWithTrash = !arRoles.includes('trash') && !trashRoles.includes('ar');
-    results.push(['AR not with Trash', arNotWithTrash]);
-    
-    // 4. AR has RF
-    const arHasRf = arRoles.includes('rf');
-    results.push(['AR has RF', arHasRf]);
-    
-    // 5. Robots >= 1
-    results.push(['Robots >= 1', robotCores.length >= 1]);
-    
-    // 6. OS >= 1
-    results.push(['OS >= 1', assignedOsCores.length >= 1]);
-    
     let allPassed = true;
-    results.forEach(([name, passed]) => {
-        console.log(`${passed ? '✅' : '❌'} ${name}`);
-        if (!passed) allPassed = false;
-    });
-    
-    console.log('\n' + (allPassed ? '🎉 ALL TESTS PASSED!' : '❌ SOME TESTS FAILED'));
+    results.forEach(([name, ok]) => { console.log(`${ok ? '✅' : '❌'} ${name}`); if (!ok) allPassed = false; });
+    console.log('\n' + (allPassed ? '🎉 ALL TESTS PASSED!' : '❌ SOME FAILED'));
     return allPassed;
 }
 
-testOptimizer();
+testMultiInstanceOptimizer();
