@@ -116,9 +116,13 @@ export function parseTopology(text: string): ParseResult {
 
                         if (['cpu_id', 'isolated'].includes(benderName)) continue;
 
-                        // Check if instanceValue is an instance name (uppercase letters/numbers)
-                        const instanceMatch = instanceValue.match(/^([A-Z][A-Z0-9]+)$/);
-                        const instanceName = instanceMatch ? instanceMatch[1] : null;
+                        // Check if instanceValue is an instance name (uppercase/numbers, looser check)
+                        // Allow anything starting with uppercase and alphanumeric, minimum 2 chars
+                        const instanceMatch = instanceValue.match(/^[A-Z][A-Z0-9]+$/);
+                        let instanceName = instanceMatch ? instanceMatch[0] : null; // Use full match
+
+                        // Explicit check: If value contains commas, it's a CPU list, not an instance name.
+                        if (instanceValue.includes(',')) instanceName = null;
 
                         // Handle net_cpu specially (shared IRQ)
                         if (benderName === 'net_cpu') {

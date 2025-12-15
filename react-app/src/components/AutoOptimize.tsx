@@ -372,8 +372,8 @@ export function AutoOptimize() {
 
     return (
         <div className="optimize-container">
-            <div className="optimize-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ margin: 0 }}>[AUTO-OPTIMIZATION V2]</h2>
+            <div className="optimize-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px' }}>
+                <h2 style={{ margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>Auto-Placement</h2>
                 <div className="optimize-actions" style={{ display: 'flex', gap: '10px' }}>
                     <button className="btn btn-primary" onClick={generateOptimization}>GENERATE V2</button>
                     {recommendations.length > 0 && <button className="btn btn-secondary" onClick={applyRecommendations}>APPLY CONFIG</button>}
