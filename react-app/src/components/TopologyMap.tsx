@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { ROLES } from '../types/topology';
 import { CoreTooltip } from './Tooltip';
+import { L3Island } from './L3Island';
+import type { L3Zone } from '../lib/hftOptimizer';
 
 // Instance colors
 const INSTANCE_COLORS: Record<string, string> = {
@@ -321,49 +323,47 @@ export function TopologyMap() {
                                         )}
                                     </div>
 
-                                    {Object.entries(l3Data).map(([l3Id, cores]) => (
-                                        <div
-                                            key={l3Id}
-                                            className="l3-group"
-                                            style={{
-                                                background: 'var(--bg-input)',
-                                                borderRadius: '8px',
-                                                padding: '10px',
-                                                marginBottom: '8px'
-                                            }}
-                                        >
-                                            <div style={{
-                                                fontSize: '10px',
-                                                color: 'var(--text-muted)',
-                                                marginBottom: '8px',
-                                                fontWeight: 500
-                                            }}>
-                                                L3 Cache #{l3Id} ({cores.length} ядер)
-                                            </div>
-                                            <div className="cores-grid" style={{
-                                                display: 'flex',
-                                                flexWrap: 'wrap',
-                                                gap: '6px'
-                                            }}>
-                                                {cores.map(cpuId => {
-                                                    const { roles, owner, instanceColor } = getCoreData(cpuId);
-                                                    return (
-                                                        <Core
-                                                            key={cpuId}
-                                                            cpuId={cpuId}
-                                                            roles={roles}
-                                                            ownerInstance={owner}
-                                                            instanceColor={instanceColor}
-                                                            isIsolated={isolatedSet.has(cpuId)}
-                                                            load={coreLoads[cpuId]}
-                                                            onMouseDown={(e) => onCoreMouseDown(cpuId, e)}
-                                                            onMouseEnter={() => onCoreMouseEnter(cpuId)}
-                                                        />
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    ))}
+                                    {Object.entries(l3Data).map(([l3Id, cores]) => {
+                                        // Determine L3 zone
+                                        const hasCore0 = cores.includes(0);
+                                        const isNetNuma = netNumaNodes.includes(parseInt(numaId));
+                                        let zone: L3Zone = 'silver';
+                                        if (hasCore0) zone = 'dirty';
+                                        else if (isNetNuma) zone = 'gold';
+
+                                        return (
+                                            <L3Island
+                                                key={l3Id}
+                                                l3Id={l3Id}
+                                                zone={zone}
+                                                numa={parseInt(numaId)}
+                                                coreCount={cores.length}
+                                            >
+                                                <div className="cores-grid" style={{
+                                                    display: 'flex',
+                                                    flexWrap: 'wrap',
+                                                    gap: '6px'
+                                                }}>
+                                                    {cores.map(cpuId => {
+                                                        const { roles, owner, instanceColor } = getCoreData(cpuId);
+                                                        return (
+                                                            <Core
+                                                                key={cpuId}
+                                                                cpuId={cpuId}
+                                                                roles={roles}
+                                                                ownerInstance={owner}
+                                                                instanceColor={instanceColor}
+                                                                isIsolated={isolatedSet.has(cpuId)}
+                                                                load={coreLoads[cpuId]}
+                                                                onMouseDown={(e) => onCoreMouseDown(cpuId, e)}
+                                                                onMouseEnter={() => onCoreMouseEnter(cpuId)}
+                                                            />
+                                                        );
+                                                    })}
+                                                </div>
+                                            </L3Island>
+                                        );
+                                    })}
                                 </div>
                             ))}
                         </div>
