@@ -1,14 +1,23 @@
 /* Layout Grid */
 .mapper-dashboard {
   display: grid;
-  grid-template-columns: 1fr 340px;
-  /* Main Map | Config Sidebar */
+  grid-template-columns: 320px 1fr 320px;
+  /* Input | Map | Config */
   grid-template-rows: 1fr;
   gap: 24px;
   height: 100%;
+  overflow: hidden;
 }
 
 .mapper-card {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* Prevent grid blowout */
+}
+
+.input-card {
   overflow: hidden;
   display: flex;
   flex-direction: column;
