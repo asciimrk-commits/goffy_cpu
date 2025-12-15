@@ -40,16 +40,7 @@
   --header-bg: #ffffff;
 }
 
---text-main: #f8fafc;
-/* Slate 50 */
---text-secondary: #94a3b8;
-/* Slate 400 */
---text-muted: #64748b;
-/* Slate 500 */
 
---card-shadow: none;
---header-bg: #1e293b;
-}
 
 /* Global Reset */
 * {
