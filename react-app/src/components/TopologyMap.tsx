@@ -127,31 +127,77 @@ function Core({ cpuId, roles, ownerInstance, instanceColor, isIsolated, load, on
     );
 }
 
-// Legend component
-function Legend({ instances }: { instances: string[] }) {
+// Palette component - clickable role selector
+function Palette({ instances }: { instances: string[] }) {
+    const { activeTool, setActiveTool } = useAppStore();
+
     return (
         <div style={{
             display: 'flex',
             flexWrap: 'wrap',
-            gap: '12px',
+            gap: '8px',
             padding: '12px 16px',
             background: 'var(--bg-input)',
             borderRadius: '8px',
-            marginBottom: '16px'
+            marginBottom: '16px',
+            alignItems: 'center'
         }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginRight: '8px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginRight: '4px' }}>
                 Роли:
             </div>
-            {Object.entries(ROLES).slice(0, 8).map(([id, role]) => (
-                <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px' }}>
-                    <div style={{ width: '10px', height: '10px', background: role.color, borderRadius: '2px' }} />
-                    <span>{role.name}</span>
-                </div>
-            ))}
+            {Object.entries(ROLES).slice(0, 9).map(([id, role]) => {
+                const isActive = activeTool === id;
+                return (
+                    <div
+                        key={id}
+                        onClick={() => setActiveTool(isActive ? null : id)}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            fontSize: '10px',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            background: isActive ? role.color : 'transparent',
+                            color: isActive ? 'white' : 'var(--text-primary)',
+                            border: isActive ? `2px solid ${role.color}` : '1px solid var(--border-color)',
+                            fontWeight: isActive ? 600 : 400,
+                            transition: 'all 0.15s ease'
+                        }}
+                    >
+                        <div style={{
+                            width: '10px',
+                            height: '10px',
+                            background: role.color,
+                            borderRadius: '2px',
+                            border: '1px solid rgba(255,255,255,0.3)'
+                        }} />
+                        <span>{role.name}</span>
+                    </div>
+                );
+            })}
+
+            {/* Clear tool button */}
+            <div
+                onClick={() => setActiveTool(null)}
+                style={{
+                    fontSize: '10px',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    background: activeTool === null ? 'var(--bg-panel)' : 'transparent',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-muted)'
+                }}
+            >
+                ✖ Сброс
+            </div>
+
             {instances.length > 0 && (
                 <>
-                    <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
-                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginRight: '8px' }}>
+                    <div style={{ width: '1px', height: '20px', background: 'var(--border-color)', margin: '0 4px' }} />
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginRight: '4px' }}>
                         Инстансы:
                     </div>
                     {instances.map((inst, idx) => (
@@ -167,6 +213,16 @@ function Legend({ instances }: { instances: string[] }) {
                     ))}
                 </>
             )}
+
+            {/* Hint */}
+            <div style={{
+                marginLeft: 'auto',
+                fontSize: '10px',
+                color: 'var(--text-muted)',
+                fontStyle: 'italic'
+            }}>
+                Click = paint • Ctrl+Click = erase
+            </div>
         </div>
     );
 }
@@ -277,8 +333,8 @@ export function TopologyMap() {
                 <div><strong>NUMA узлов:</strong> {Object.values(geometry).reduce((acc, s) => acc + Object.keys(s).length, 0)}</div>
             </div>
 
-            {/* Legend */}
-            <Legend instances={instanceNames} />
+            {/* Palette - clickable role selector */}
+            <Palette instances={instanceNames} />
 
             {/* Topology grid */}
             <div className="topology-grid">
