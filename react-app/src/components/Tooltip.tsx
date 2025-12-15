@@ -3,19 +3,20 @@ import { ROLES } from '../types/topology';
 import './Tooltip.css';
 
 interface TooltipProps {
-    cpuId: number;
+    cpuId: string | number;
     roles: string[];
     load?: number;
     isIsolated: boolean;
+    instanceName?: string;
     children: React.ReactNode;
 }
 
-export function CoreTooltip({ cpuId, roles, load, isIsolated, children }: TooltipProps) {
+export function CoreTooltip({ cpuId, roles, load, isIsolated, instanceName, children }: TooltipProps) {
     const [show, setShow] = useState(false);
     const [position, setPosition] = useState({ x: 0, y: 0 });
 
     const handleMouseEnter = (e: React.MouseEvent) => {
-        const rect = (e.target as HTMLElement).getBoundingClientRect();
+        const rect = (e.currentTarget).getBoundingClientRect();
         setPosition({ x: rect.left + rect.width / 2, y: rect.top });
         setShow(true);
     };
@@ -43,6 +44,11 @@ export function CoreTooltip({ cpuId, roles, load, isIsolated, children }: Toolti
                         <span className="tooltip-cpu">CPU {cpuId}</span>
                         {isIsolated && <span className="tooltip-badge isolated">ISOLATED</span>}
                     </div>
+                    {instanceName && (
+                        <div className="tooltip-instance" style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>
+                            Instance: <span style={{ color: '#fff', fontWeight: 600 }}>{instanceName}</span>
+                        </div>
+                    )}
                     {load !== undefined && (
                         <div className="tooltip-load">
                             Load: <span className="load-value">{load.toFixed(1)}%</span>

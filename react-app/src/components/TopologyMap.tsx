@@ -37,7 +37,7 @@ function Core({ cpuId, roles, ownerInstance, isIsolated, load, onMouseDown, onMo
     }
 
     return (
-        <CoreTooltip cpuId={cpuId} roles={roles} load={load} isIsolated={isIsolated}>
+        <CoreTooltip cpuId={cpuId} roles={roles} load={load} isIsolated={isIsolated} instanceName={ownerInstance}>
             <div
                 onMouseDown={onMouseDown}
                 onMouseEnter={onMouseEnter}
