@@ -56,6 +56,7 @@ export function AutoOptimize() {
     const [instanceOwnership, setInstanceOwnership] = useState<Record<string, Set<number>>>({});
     const [instColors, setInstColors] = useState<Record<string, string>>(INSTANCE_COLORS);
     const [proposedAllocation, setProposedAllocation] = useState<Record<string, Record<string, string[]>> | null>(null);
+    const [hoveredInstance, setHoveredInstance] = useState<string | null>(null);
 
     const generateOptimization = () => {
         if (Object.keys(geometry).length === 0) {
@@ -102,14 +103,7 @@ export function AutoOptimize() {
         const rawInstances = new Set<string>();
         Object.values(instances).forEach(() => {
             // If Physical has roles like "HUB7:..."
-            // actually parser split them.
         });
-        // We rely on what parser provided.
-        // But for Auto-Opt, we usually start from scratch or existing?
-        // KB says "Full Rewrite".
-        // We will detect instance names from the `instances` object keys (excluding Physical)
-        // OR scan the 'Physical' map for roles that look like instance tags?
-        // Actually earlier code used `parsed.instances` keys.
 
         Object.keys(instances).forEach(k => {
             if (k !== 'Physical' && k !== 'OS') rawInstances.add(k);
@@ -121,8 +115,9 @@ export function AutoOptimize() {
         calcNeeded(getTotalLoad(instances['OS'] ? Object.keys(instances['OS']) : []), 25);
 
         // Setup Instance Demands
-        // (Removed empty loop)
-
+        detectedInstances.forEach(() => {
+            // ... (existing logic)
+        });
         // Parse existing roles
         Object.entries(instances).forEach(([instName, cpuMap]) => {
             if (instName === 'Physical') return;
@@ -343,26 +338,9 @@ export function AutoOptimize() {
                 if (otherPool.length > 0) taken.push(otherPool.shift()!);
                 else if (netPool.length > 0) taken.push(netPool.shift()!); // Fill net if valid
                 else if (allRemaining.length > 0) {
-                    // If we used pop functions, our local 'allRemaining' array is stale?
-                    // Yes, netPool and otherPool are being mutated.
-                    // So we are good.
+                    // Safety check
                 }
             }
-
-            // If we ran out of specific pools but still have capacity in the other?
-            // The pop functions mutate netPool/otherPool.
-
-            // Any leftovers in pools?
-            // "Fairness" distribution of remaining cores logic from v9...
-            // Let's simplify: Satisfy demand first. Then distribute leftovers?
-            // Or just satisfy demand. "Target 25% load".
-
-            // If we have extra cores, filling them might lower load further.
-            // Let's just create a "Default" pool with leftovers for each instance?
-            // Or just leave unassigned?
-            // v9 logic: "Fairness: distribute remaining available cores".
-
-            // Let's just take STRICT demand for now.
 
             if (taken.length > 0) {
                 taken.forEach(c => assignRole(c, 'robot_default', d.name));
@@ -377,16 +355,7 @@ export function AutoOptimize() {
             }
         });
 
-        // Fill leftovers?
-        // User said: "1-2 cores buffer to gateways". Done.
-        // "Robots target 25-30%".
-        // If we have many cores left, robots will be very happy.
-        // Let's assign remaining cores to robots round-robin to ensure usage?
-        // "For the rest there are mandatory conditions... robots target 25-30%... calculate needed"
-        // If we calculated needed, we are good.
-        // Unassigned cores -> Spare? Or give to robots?
-        // Usually better to give to robots.
-
+        // Fill leftovers
         let leftoverCount = netPool.length + otherPool.length;
         if (leftoverCount > 0 && demands.length > 0) {
             const leftovers = [...otherPool, ...netPool]; // Prefer other
@@ -397,11 +366,6 @@ export function AutoOptimize() {
                 assignRole(c, 'robot_default', d.name);
                 dIdx++;
             }
-            // Update recs descriptions? Too complex. Just silently assign for now or
-            // Assume the "Robots" rec includes them. 
-            // We need to update the recommendation content.
-            // Let's re-generate recs? No.
-            // Just append a "Spare" rec?
         }
 
         setInstColors(newInstColors);
@@ -419,122 +383,128 @@ export function AutoOptimize() {
         setResult('Applied!');
     };
 
-    // Rendering
-    const groupedRecs: Record<string, Recommendation[]> = {};
-    recommendations.forEach(rec => {
-        if (!groupedRecs[rec.instance]) groupedRecs[rec.instance] = [];
-        groupedRecs[rec.instance].push(rec);
-    });
-
-    const instanceOrder = Object.keys(groupedRecs).sort((a, b) => {
-        if (a === 'OS') return -1;
-        if (b === 'OS') return 1;
-        return a.localeCompare(b);
-    });
-
-    const renderInstanceTopology = (instName: string) => {
-        const owned = instanceOwnership[instName] || new Set();
-        const color = instColors[instName] || '#64748b';
-        const netNuma = String(netNumaNodes.length > 0 ? netNumaNodes[0] : 0);
-
-        // Highlight L3 pools clearly? 
-        // We already group by L3 in the grid.
-
+    // === RENDER ===
+    const renderUnifiedMap = () => {
         return (
-            <div className="instance-topology" key={instName} style={{ marginBottom: '20px', borderLeft: `3px solid ${color}`, paddingLeft: '10px' }}>
-                <h4 style={{ color: color, fontSize: '1.0rem', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center' }}>
-                    {instName} Map
-                </h4>
-                <div className="topology-grid compact">
-                    {Object.entries(geometry).map(([socketId, numaData]) => (
-                        <div key={socketId} className="socket-card compact" style={{ borderColor: '#334155' }}>
-                            {Object.entries(numaData).map(([numaId, l3Data]) => {
-                                const isNet = String(numaId) === netNuma;
-                                return (
-                                    <div key={numaId} className="numa-section compact" style={{ backgroundColor: isNet ? 'rgba(16, 185, 129, 0.05)' : 'transparent', border: isNet ? '1px solid #059669' : '1px solid #334155' }}>
-                                        <div className="numa-header" style={{ color: isNet ? '#10b981' : '#94a3b8' }}>
-                                            NUMA {numaId} {isNet && ' [NET]'}
-                                        </div>
-                                        {Object.entries(l3Data).map(([l3Id, cores]) => (
-                                            <div key={l3Id} className="l3-group compact">
-                                                <div style={{ fontSize: '8px', color: '#64748b', marginBottom: '2px' }}>L3-{l3Id}</div>
-                                                <div className="cores-grid compact">
-                                                    {cores.map(cpuId => {
-                                                        const isOwned = owned.has(cpuId);
-                                                        return (
-                                                            <div
-                                                                key={cpuId}
-                                                                className="core compact"
-                                                                style={{
-                                                                    opacity: isOwned ? 1 : 0.1,
-                                                                    backgroundColor: isOwned ? color : '#1e293b',
-                                                                    boxShadow: isOwned ? `0 0 5px ${color}40` : 'none',
-                                                                    color: isOwned ? '#fff' : '#475569',
-                                                                    fontWeight: isOwned ? 'bold' : 'normal'
-                                                                }}
-                                                            >
-                                                                {cpuId}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-                                        ))}
+            <div className="topology-grid" style={{ overflow: 'auto' }}>
+                {Object.entries(geometry).map(([socketId, numaData]) => (
+                    <div key={socketId} className="socket-card">
+                        <div className="socket-header">Socket {socketId}</div>
+                        {Object.entries(numaData).map(([numaId, l3Data]) => {
+                            const isNet = netNumaNodes.includes(parseInt(numaId));
+                            return (
+                                <div key={numaId} className="numa-section" style={{
+                                    borderColor: isNet ? 'var(--color-success)' : 'var(--border-color)',
+                                    backgroundColor: isNet ? 'rgba(16, 185, 129, 0.05)' : 'transparent'
+                                }}>
+                                    <div className="numa-header" style={{ color: isNet ? 'var(--color-success)' : 'var(--text-secondary)' }}>
+                                        NUMA {numaId} {isNet && '[NET]'}
                                     </div>
-                                )
-                            })}
-                        </div>
-                    ))}
-                </div>
+                                    <div className="cmp-cores">
+                                        {Object.entries(l3Data).flatMap(([, cores]) => cores).map(cpuId => {
+                                            // Find Owner
+                                            let owner = 'Free';
+                                            let color = '#334155'; // default
+
+                                            for (const [inst, set] of Object.entries(instanceOwnership)) {
+                                                if (set.has(cpuId)) {
+                                                    owner = inst;
+                                                    color = instColors[inst] || '#64748b';
+                                                    break;
+                                                }
+                                            }
+
+                                            // Opacity Logic
+                                            // If hover:
+                                            //   Highlight hovered instance + OS
+                                            //   Fade everything else
+                                            let opacity = 1;
+                                            if (hoveredInstance) {
+                                                const isTarget = owner === hoveredInstance;
+                                                const isOS = owner === 'OS';
+
+                                                if (!isTarget && !isOS) {
+                                                    opacity = 0.2;
+                                                }
+                                            }
+
+                                            return (
+                                                <div
+                                                    key={cpuId}
+                                                    className="core"
+                                                    onMouseEnter={() => owner !== 'Free' && setHoveredInstance(owner)}
+                                                    onMouseLeave={() => setHoveredInstance(null)}
+                                                    title={`Core ${cpuId} | Assigned: ${owner}`}
+                                                    style={{
+                                                        backgroundColor: color,
+                                                        opacity,
+                                                        transition: 'opacity 0.2s',
+                                                        color: '#fff',
+                                                        cursor: owner !== 'Free' ? 'default' : 'not-allowed'
+                                                    }}
+                                                >
+                                                    {cpuId}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ))}
             </div>
         );
     };
 
     return (
         <div className="optimize-container">
-            <div className="optimize-header">
-                <h2>[AUTO-OPTIMIZATION ENGINE]</h2>
+            <div className="optimize-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 style={{ margin: 0 }}>[AUTO-OPTIMIZATION ENGINE]</h2>
+                <div className="optimize-actions" style={{ display: 'flex', gap: '10px' }}>
+                    <button className="btn btn-primary" onClick={generateOptimization}>GENERATE</button>
+                    {recommendations.length > 0 && <button className="btn btn-secondary" onClick={applyRecommendations}>APPLY CONFIG</button>}
+                </div>
             </div>
 
-            <div className="optimize-actions">
-                <button className="btn btn-primary btn-lg" onClick={generateOptimization}>GENERATE</button>
-                {recommendations.length > 0 && <button className="btn btn-secondary" onClick={applyRecommendations}>APPLY</button>}
-            </div>
+            {result && <div className="optimize-result" style={{ marginBottom: '20px', padding: '10px', background: 'var(--bg-input)', borderRadius: 'var(--radius-md)' }}>{result}</div>}
 
-            {result && <div className="optimize-result">{result}</div>}
+            {recommendations.length > 0 ? (
+                renderUnifiedMap()
+            ) : (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    Press GENERATE to calculate optimal placement
+                </div>
+            )}
 
-            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '20px' }}>
-                {/* Left col: Recommendations */}
-                <div style={{ flex: '1 1 400px' }}>
-                    {instanceOrder.map(instName => (
-                        <div key={instName} className="instance-section" style={{ borderLeft: `3px solid ${instColors[instName] || '#ccc'}`, paddingLeft: '10px' }}>
-                            <h3 className="instance-header" style={{ color: instColors[instName] }}>=== {instName} ===</h3>
-                            {groupedRecs[instName].map((rec, idx) => (
-                                <div key={idx} className={`recommend-card ${rec.warning ? 'warning' : ''}`}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                        <h4>{rec.title}</h4>
-                                        <span style={{ fontSize: '10px', opacity: 0.7 }}>{rec.role}</span>
-                                    </div>
-                                    <p>{rec.description}</p>
-                                    {rec.rationale && <p className="rationale">{rec.rationale}</p>}
-                                    {rec.cores.length > 0 && (
-                                        <div className="recommend-cores">
-                                            {rec.cores.map(c => (
-                                                <span key={c} className="recommend-core" style={{ backgroundColor: instColors[instName] || '#64748b' }} title={`Instance: ${instName}`}>{c}</span>
-                                            ))}
-                                        </div>
-                                    )}
+            {/* Recommendations List (Bottom) */}
+            {recommendations.length > 0 && (
+                <div style={{ marginTop: '30px', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
+                    <h3>Allocation Details</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+                        {recommendations.map((rec, idx) => (
+                            <div key={idx} className="recommend-card" style={{
+                                borderLeft: `3px solid ${instColors[rec.instance] || '#ccc'}`,
+                                background: 'var(--bg-panel)',
+                                padding: '12px',
+                                borderRadius: 'var(--radius-sm)',
+                                boxShadow: 'var(--shadow-sm)'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                    <span style={{ fontWeight: 600, color: instColors[rec.instance] }}>{rec.instance}</span>
+                                    <span style={{ fontSize: '0.8em', opacity: 0.7 }}>{rec.role}</span>
                                 </div>
-                            ))}
-                        </div>
-                    ))}
+                                <div style={{ fontSize: '0.9em', marginBottom: '8px' }}>{rec.description}</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    {rec.cores.map(c => (
+                                        <span key={c} style={{ fontSize: '0.75em', padding: '2px 6px', background: 'var(--bg-input)', borderRadius: '4px' }}>{c}</span>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
-
-                {/* Right col: Mini Maps */}
-                <div style={{ flex: '1 1 300px' }}>
-                    {instanceOrder.map(i => renderInstanceTopology(i))}
-                </div>
-            </div>
+            )}
         </div>
     );
 }

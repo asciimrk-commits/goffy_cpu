@@ -210,8 +210,32 @@ button.primary:hover,
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 20px 0;
+  /* padding: 20px 0; Removed padding to handle header spacing internally */
   z-index: 30;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  /* Prevent shrinking */
+}
+
+.sidebar.expanded {
+  width: 260px;
+  align-items: flex-start;
+  /* Left align items when expanded */
+}
+
+.sidebar.expanded .nav-item {
+  width: 90%;
+  justify-content: flex-start;
+  /* Label alignment */
+  padding-left: 12px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.sidebar.expanded .logo-icon-bg {
+  margin-bottom: 0;
 }
 
 .nav-item {
@@ -225,6 +249,27 @@ button.primary:hover,
   cursor: pointer;
   margin-bottom: 8px;
   transition: all 0.2s;
+  white-space: nowrap;
+  /* Prevent wrapping */
+}
+
+.nav-label {
+  margin-left: 12px;
+  font-weight: 500;
+  font-size: 0.95rem;
+  animation: fadeIn 0.2s ease-in forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .nav-item:hover {

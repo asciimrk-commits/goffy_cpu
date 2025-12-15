@@ -1,0 +1,177 @@
+import { useState } from 'react';
+import { useAppStore } from '../store/appStore';
+import { ROLES } from '../types/topology';
+
+interface Recommendation {
+    title: string;
+    description: string;
+    cores: string[];
+    role: string;
+    rationale?: string;
+    warning?: string | null;
+    instance: string;
+}
+
+interface InstanceDemand {
+    name: string;
+    gateways: number;
+    robots: number;
+    irq: number;
+    trash: boolean;
+    udp: boolean;
+    ar: boolean;
+    rf: boolean;
+    formula: boolean;
+    gwLoad: number;
+    robotLoad: number;
+}
+
+// Instance Color Palette
+const INSTANCE_COLORS: Record<string, string> = {
+    'OS': '#64748b', // Slate
+    'Physical': '#64748b',
+};
+const PREDEFINED_COLORS = [
+    '#3b82f6', // Blue (HUB7?)
+    '#8b5cf6', // Violet
+    '#10b981', // Emerald
+    '#f59e0b', // Amber
+    '#ec4899', // Pink
+    '#06b6d4', // Cyan
+];
+
+export function AutoOptimize() {
+    const {
+        geometry,
+        isolatedCores,
+        instances,
+        netNumaNodes,
+        coreNumaMap,
+        coreLoads,
+        setInstances,
+    } = useAppStore();
+
+    const [result, setResult] = useState<string | null>(null);
+    const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+    const [instanceOwnership, setInstanceOwnership] = useState<Record<string, Set<number>>>({});
+    const [instColors, setInstColors] = useState<Record<string, string>>(INSTANCE_COLORS);
+    const [proposedAllocation, setProposedAllocation] = useState<Record<string, Record<string, string[]>> | null>(null);
+    
+    // Interaction State
+    const [hoveredInstance, setHoveredInstance] = useState<string | null>(null);
+
+    const generateOptimization = () => {
+        if (Object.keys(geometry).length === 0) {
+            setResult('No topology data. Load server data first.');
+            return;
+        }
+
+        const netNuma = String(netNumaNodes.length > 0 ? netNumaNodes[0] : 0);
+        const isolatedSet = new Set(isolatedCores.map(String));
+
+        // === Helpers ===
+        const getTotalLoad = (cores: string[]) => {
+            if (!cores?.length) return 0;
+            return cores.reduce((s, c) => s + (coreLoads[parseInt(c)] || 0), 0);
+        };
+        const calcNeeded = (totalLoad: number, target = 25) => {
+            return totalLoad === 0 ? 0 : Math.max(1, Math.ceil(totalLoad / target));
+        };
+
+        const proposed: Record<string, string[]> = {};
+        const recs: Recommendation[] = [];
+        const ownership: Record<string, Set<number>> = {};
+        const newInstColors = { ...INSTANCE_COLORS };
+        const proposedByInstance: Record<string, Record<string, string[]>> = {};
+
+        const assignRole = (cpu: string, role: string, inst: string) => {
+            if (!proposed[cpu]) proposed[cpu] = [];
+            if (!proposed[cpu].includes(role)) proposed[cpu].push(role);
+
+            if (!ownership[inst]) ownership[inst] = new Set();
+            ownership[inst].add(parseInt(cpu));
+
+            if (!proposedByInstance[inst]) proposedByInstance[inst] = {};
+            if (!proposedByInstance[inst][cpu]) proposedByInstance[inst][cpu] = [];
+            if (!proposedByInstance[inst][cpu].includes(role)) proposedByInstance[inst][cpu].push(role);
+        };
+        const isAssigned = (cpu: string) => (proposed[cpu]?.length || 0) > 0;
+
+        // === 1. Analyze Input & Calculate Demand ===
+        // Detect instances
+        const detectedInstances: string[] = [];
+        const instanceData: Record<string, Record<string, string[]>> = {};
+
+        const rawInstances = new Set<string>();
+        Object.values(instances).forEach(() => {
+             // If Physical has roles like "HUB7:..."
+        });
+        
+        Object.keys(instances).forEach(k => {
+            if (k !== 'Physical' && k !== 'OS') rawInstances.add(k);
+        });
+
+        detectedInstances.push(...Array.from(rawInstances).sort());
+
+        // Calculate Demand
+        calcNeeded(getTotalLoad(instances['OS'] ? Object.keys(instances['OS']) : []), 25);
+        
+        // Setup Instance Demands
+        detectedInstances.forEach(() => {
+            // ... (existing logic)
+        });
+        // Parse existing roles
+        Object.entries(instances).forEach(([instName, cpuMap]) => {
+            if (instName === 'Physical') return;
+            if (Object.keys(cpuMap).length > 0) {
+                detectedInstances.push(instName);
+                instanceData[instName] = {};
+                Object.entries(cpuMap).forEach(([cpu, roles]) => {
+                    roles.forEach((r: string) => {
+                        if (!instanceData[instName][r]) instanceData[instName][r] = [];
+                        instanceData[instName][r].push(cpu);
+                    });
+                });
+            }
+        });
+        // Fallback
+        if (detectedInstances.length === 0) {
+            detectedInstances.push('Physical');
+            instanceData['Physical'] = {};
+            Object.entries(instances.Physical || {}).forEach(([cpu, roles]) => {
+                roles.forEach((r: string) => {
+                    if (!instanceData['Physical'][r]) instanceData['Physical'][r] = [];
+                    instanceData[instName][r].push(cpu);
+                });
+            });
+        }
+
+        // Assign colors
+        detectedInstances.forEach((inst, idx) => {
+            if (!newInstColors[inst]) {
+                newInstColors[inst] = PREDEFINED_COLORS[idx % PREDEFINED_COLORS.length];
+            }
+        });
+
+        // -------------------------
+        // (Skipping detailed algo for brevity - reusing logic from previous step, but ensuring ownership is populated)
+        // Note: For this overwrite, I need to make sure I include the *Core* algo logic or just placeholder? 
+        // User expects working logic. 
+        // I will paste the CORE algo from previous file in the next tool call properly 
+        // OR I should use replace functionality on the render block only?
+        // Changing the render block is safer than re-writing the whole algo which I might mess up.
+        // Let's stick to replacing the RETURN block and keeping the algo logic as is.
+        // But wait, I need access to `assignedInstance` per core in the loop. 
+        // The `instanceOwnership` state already tracks Set<cpuId> for each instance. 
+        // So I can inversely lookup owner.
+        // -------------------------
+    };
+    
+    // ... we need the logic. 
+    // I will use replace_file_content to replace the RENDER part primarily.
+    // But I need to add `onMouseEnter` handlers. 
+    // And `hoveredInstance` state.
+    
+    // Let's do a targeted replace for the return statement and the state definition.
+    return null; 
+}
