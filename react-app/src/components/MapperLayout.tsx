@@ -192,12 +192,14 @@ export function MapperLayout() {
                 <TagsLegend />
             </div>
 
-            {/* Bottom: Config Output (collapsible) */}
+            {/* Bottom: Config Output - smaller */}
             <div style={{
                 borderTop: '1px solid var(--border-color)',
                 background: 'var(--bg-panel)',
-                maxHeight: '200px',
-                overflow: 'auto'
+                maxHeight: '150px',
+                minHeight: '40px',
+                overflow: 'auto',
+                fontSize: '11px'
             }}>
                 <ConfigOutput />
             </div>
