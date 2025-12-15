@@ -127,106 +127,6 @@ function Core({ cpuId, roles, ownerInstance, instanceColor, isIsolated, load, on
     );
 }
 
-// Palette component - clickable role selector
-function Palette({ instances }: { instances: string[] }) {
-    const { activeTool, setActiveTool } = useAppStore();
-
-    return (
-        <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '8px',
-            padding: '12px 16px',
-            background: 'var(--bg-input)',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            alignItems: 'center'
-        }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginRight: '4px' }}>
-                Роли:
-            </div>
-            {Object.entries(ROLES).slice(0, 9).map(([id, role]) => {
-                const isActive = activeTool === id;
-                return (
-                    <div
-                        key={id}
-                        onClick={() => setActiveTool(isActive ? null : id)}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '5px',
-                            fontSize: '10px',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            background: isActive ? role.color : 'transparent',
-                            color: isActive ? 'white' : 'var(--text-primary)',
-                            border: isActive ? `2px solid ${role.color}` : '1px solid var(--border-color)',
-                            fontWeight: isActive ? 600 : 400,
-                            transition: 'all 0.15s ease'
-                        }}
-                    >
-                        <div style={{
-                            width: '10px',
-                            height: '10px',
-                            background: role.color,
-                            borderRadius: '2px',
-                            border: '1px solid rgba(255,255,255,0.3)'
-                        }} />
-                        <span>{role.name}</span>
-                    </div>
-                );
-            })}
-
-            {/* Clear tool button */}
-            <div
-                onClick={() => setActiveTool(null)}
-                style={{
-                    fontSize: '10px',
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    background: activeTool === null ? 'var(--bg-panel)' : 'transparent',
-                    border: '1px solid var(--border-color)',
-                    color: 'var(--text-muted)'
-                }}
-            >
-                ✖ Сброс
-            </div>
-
-            {instances.length > 0 && (
-                <>
-                    <div style={{ width: '1px', height: '20px', background: 'var(--border-color)', margin: '0 4px' }} />
-                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginRight: '4px' }}>
-                        Инстансы:
-                    </div>
-                    {instances.map((inst, idx) => (
-                        <div key={inst} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px' }}>
-                            <div style={{
-                                width: '10px',
-                                height: '10px',
-                                background: getInstanceColor(inst, idx),
-                                borderRadius: '2px'
-                            }} />
-                            <span>{inst}</span>
-                        </div>
-                    ))}
-                </>
-            )}
-
-            {/* Hint */}
-            <div style={{
-                marginLeft: 'auto',
-                fontSize: '10px',
-                color: 'var(--text-muted)',
-                fontStyle: 'italic'
-            }}>
-                Click = paint • Ctrl+Click = erase
-            </div>
-        </div>
-    );
-}
-
 export function TopologyMap() {
     const { geometry, instances, isolatedCores, coreLoads, activeTool, paintCore, eraseCore, netNumaNodes } = useAppStore();
     const isolatedSet = new Set(isolatedCores);
@@ -333,37 +233,41 @@ export function TopologyMap() {
                 <div><strong>NUMA узлов:</strong> {Object.values(geometry).reduce((acc, s) => acc + Object.keys(s).length, 0)}</div>
             </div>
 
-            {/* Palette - clickable role selector */}
-            <Palette instances={instanceNames} />
-
-            {/* Topology grid */}
-            <div className="topology-grid">
+            {/* Topology grid - matching reference design */}
+            <div className="topology-grid" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {Object.entries(geometry).map(([socketId, numaData]) => (
                     <div
                         key={socketId}
                         className="socket-card"
                         style={{
-                            border: '2px solid var(--color-primary)',
-                            borderRadius: '12px',
-                            padding: '16px',
-                            marginBottom: '16px',
-                            background: 'var(--bg-panel)'
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            background: 'rgba(30, 41, 59, 0.5)',
+                            overflow: 'hidden'
                         }}
                     >
+                        {/* Socket header - centered like reference */}
                         <div style={{
-                            display: 'inline-block',
-                            background: 'var(--color-primary)',
-                            color: 'white',
-                            padding: '6px 16px',
-                            borderRadius: '6px',
+                            textAlign: 'center',
+                            padding: '10px',
+                            background: 'rgba(0,0,0,0.2)',
+                            borderBottom: '1px solid var(--border-color)',
                             fontSize: '13px',
-                            fontWeight: 700,
-                            marginBottom: '12px'
+                            fontWeight: 600,
+                            letterSpacing: '1px',
+                            textTransform: 'uppercase',
+                            color: 'var(--text-muted)'
                         }}>
-                            Socket {socketId}
+                            SOCKET {socketId}
                         </div>
 
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                        {/* NUMAs in row */}
+                        <div style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '0',
+                            padding: '12px'
+                        }}>
                             {Object.entries(numaData).map(([numaId, l3Data]) => (
                                 <div
                                     key={numaId}
