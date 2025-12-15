@@ -157,26 +157,16 @@ export function AutoOptimize() {
 
         const osLoadPerCore = assignedOsCores.length > 0 ? osLoad / assignedOsCores.length : 0;
         recs.push({
-            title: '[OS] Shared',
+            title: '[OS]',
             cores: assignedOsCores,
             description: `${assignedOsCores.length} ядер (${osLoad.toFixed(0)}% → ${osLoadPerCore.toFixed(0)}%/core)`,
             role: 'sys_os',
             rationale: 'Target 30%, от 0 последовательно',
+            instance: 'OS',
         });
 
-        // === PHASE 2: Shared Net IRQ (from net_cpu config) ===
-        // These are typically marked with net_cpu in BENDER
-        const netIrqCores = currentRoles['net_irq'] || [];
-        netIrqCores.forEach(c => assignRole(parseInt(c), 'net_irq'));
-        if (netIrqCores.length > 0) {
-            recs.push({
-                title: '[NET IRQ] Shared',
-                cores: netIrqCores.map(Number),
-                description: `${netIrqCores.length} ядер`,
-                role: 'net_irq',
-                rationale: 'net_cpu из конфига',
-            });
-        }
+
+        // NOTE: IRQ is calculated per-instance, not shared
 
         // === PHASE 3: Per-Instance Allocation ===
         const instanceAllocations: InstanceAllocation[] = [];
@@ -405,6 +395,7 @@ export function AutoOptimize() {
                 description: `${remainingNonIsolated.length} ядер`,
                 role: 'sys_os',
                 rationale: 'Не изолированы → OS',
+                instance: 'OS',
             });
         }
 
@@ -462,9 +453,9 @@ export function AutoOptimize() {
         setResult('Applied! Check topology map.');
     };
 
-    // Group recommendations by instance
+    // Group recommendations by instance (no "Shared" - OS is its own group)
     const groupedRecs = recommendations.reduce((acc, rec) => {
-        const key = rec.instance || 'Shared';
+        const key = rec.instance || 'OS';
         if (!acc[key]) acc[key] = [];
         acc[key].push(rec);
         return acc;
