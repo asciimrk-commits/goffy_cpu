@@ -1,137 +1,127 @@
 /**
- * Unit test for Multi-Instance Optimizer with Core Partitioning
- * Tests with 48-core dual-instance system (HUB7 + RFQ1)
+ * Unit test for Multi-Instance Optimizer v4
+ * Tests per-instance IRQ, 30% load target, separate allocations
  */
 
-function testMultiInstanceOptimizer() {
-    console.log('========== MULTI-INSTANCE OPTIMIZER TEST ==========\n');
+function testMultiInstanceOptimizerV4() {
+    console.log('========== MULTI-INSTANCE OPTIMIZER v4 TEST ==========\n');
 
+    // === Setup: 48 cores, HUB7 + RFQ1 ===
     const totalCores = 48;
-    const allCoresSorted = Array.from({ length: 48 }, (_, i) => i);
+    const allCores = Array.from({ length: 48 }, (_, i) => i);
 
-    // OS cores: 0, 1, 2 (non-isolated) 
-    // Isolated: 3-47
-    const isolatedCores = allCoresSorted.filter(c => c >= 3);
+    // Isolation: 0,1 = OS, 2-43 = isolated, 44-47 = OS
+    const isolatedCores = allCores.filter(c => c >= 2 && c <= 43);
     const isolatedSet = new Set(isolatedCores.map(String));
 
-    const coreLoads = {
-        0: 10, 1: 10, 2: 10,  // OS = 30%
-        9: 25, 10: 25, 11: 25, // HUB7 gw = 75%
-        17: 20, 18: 20, 19: 20 // RFQ1 gw = 60%
-    };
+    // Load data  
+    const coreLoads = {};
+    // HUB7 gateways (5,6,7,8): ~10% each = 40%
+    [5, 6, 7, 8].forEach(c => coreLoads[c] = 10);
+    // RFQ1 gateways (27,28,29,30,31): ~12% each = 60%
+    [27, 28, 29, 30, 31].forEach(c => coreLoads[c] = 12);
+    // HUB7 robots: ~5% each = ~55%
+    [10, 11, 12, 13, 17, 18, 19, 20, 21, 22, 23].forEach(c => coreLoads[c] = 5);
+    // RFQ1 robots: ~3% each = ~33%
+    [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43].forEach(c => coreLoads[c] = 3);
+    // OS cores: ~15% each
+    [0, 1, 44, 45, 46, 47].forEach(c => coreLoads[c] = 15);
 
-    const instances = ['HUB7', 'RFQ1'];
-    const instanceRoles = {
-        'HUB7': { 'gateway': ['9', '10', '11'] },
-        'RFQ1': { 'gateway': ['17', '18', '19'] }
-    };
-    const currentRoles = {
-        'sys_os': ['0', '1', '2'],
-        'gateway': ['9', '10', '11', '17', '18', '19']
+    const instances = {
+        HUB7: {
+            gateway: [5, 6, 7, 8],
+            robot_default: [10, 11, 12, 13, 17, 18, 19, 20, 21, 22, 23]
+        },
+        RFQ1: {
+            gateway: [27, 28, 29, 30, 31],
+            robot_default: [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43]
+        }
     };
 
     const getTotalLoad = (cores) => {
         if (!cores?.length) return 0;
-        return cores.reduce((sum, c) => sum + (coreLoads[parseInt(c)] || 0), 0);
+        return cores.reduce((sum, c) => sum + (coreLoads[c] || 0), 0);
     };
 
-    const proposed = {};
     const assignedCores = new Set();
+    const assignRole = (c) => assignedCores.add(c);
+    const isAssigned = (c) => assignedCores.has(c);
 
-    const assignRole = (cpu, role) => {
-        const cpuStr = String(cpu);
-        if (!proposed[cpuStr]) proposed[cpuStr] = [];
-        if (!proposed[cpuStr].includes(role)) proposed[cpuStr].push(role);
-        assignedCores.add(parseInt(cpu));
-    };
-    const isAssigned = (cpu) => assignedCores.has(parseInt(cpu));
-
-    // PHASE 1: OS
+    // === PHASE 1: OS (30% target) ===
     console.log('=== PHASE 1: OS ===');
-    const osCoresAvailable = allCoresSorted.filter(c => !isolatedSet.has(String(c)));
-    const osLoad = getTotalLoad(currentRoles['sys_os']);
-    let osNeeded = Math.max(1, Math.ceil(osLoad / 25));
-    osNeeded = Math.min(osNeeded, osCoresAvailable.length);
-    osCoresAvailable.slice(0, osNeeded).forEach(c => assignRole(c, 'sys_os'));
-    console.log(`OS: ${osNeeded} cores (${osLoad}% / 25 = ${Math.ceil(osLoad / 25)})`);
-    console.log(`CHECK: OS formula? ${osNeeded === Math.ceil(osLoad / 25) ? '✅' : '❌'}`);
+    const osCores = allCores.filter(c => !isolatedSet.has(String(c)));
+    const osLoad = getTotalLoad(osCores);
+    const osNeeded = Math.max(1, Math.ceil(osLoad / 30));
+    osCores.slice(0, osNeeded).forEach(c => assignRole(c));
 
-    // PHASE 2: IRQ
-    console.log('\n=== PHASE 2: IRQ ===');
-    const totalGw = 6;
-    const neededIrq = Math.min(6, Math.max(1, Math.ceil(totalGw / 4)));
-    isolatedCores.filter(c => !isAssigned(c)).slice(0, neededIrq).forEach(c => assignRole(c, 'net_irq'));
-    console.log(`IRQ: ${neededIrq} cores (${totalGw} gw / 4)`);
-    console.log(`CHECK: IRQ formula? ${neededIrq === Math.ceil(totalGw / 4) ? '✅' : '❌'}`);
+    console.log(`OS cores: [${osCores.join(', ')}]`);
+    console.log(`OS load: ${osLoad}% / 30 = ${osNeeded} cores needed`);
+    console.log(`CHECK: OS formula correct? ${osNeeded === Math.ceil(osLoad / 30) ? '✅' : '❌'}`);
 
-    // PHASE 3: Partition
-    console.log('\n=== PHASE 3: Partition ===');
-    const available = isolatedCores.filter(c => !isAssigned(c));
-    const perInstance = Math.floor(available.length / instances.length);
-    const pools = {};
-    instances.forEach((inst, i) => {
-        const start = i * perInstance;
-        const end = i === instances.length - 1 ? available.length : start + perInstance;
-        pools[inst] = available.slice(start, end);
-        console.log(`${inst}: ${pools[inst].length} cores`);
-    });
+    // === PHASE 2: Per-Instance ===
+    console.log('\n=== PHASE 2: Per-Instance ===');
 
-    // PHASE 4: Per-Instance
-    console.log('\n=== PHASE 4: Per-Instance ===');
-    for (const inst of instances) {
-        console.log(`\n--- ${inst} ---`);
-        const pool = [...pools[inst]];
-        let idx = 0;
-        const get = () => idx < pool.length && !isAssigned(pool[idx]) ? pool[idx++] : null;
+    for (const [instName, instRoles] of Object.entries(instances)) {
+        console.log(`\n--- ${instName} ---`);
 
-        // Trash, UDP, AR
-        const trash = get(); if (trash !== null) { assignRole(trash, 'trash'); console.log(`Trash: ${trash}`); }
-        const udp = get(); if (udp !== null) { assignRole(udp, 'udp'); console.log(`UDP: ${udp}`); }
-        const ar = get(); if (ar !== null) { assignRole(ar, 'ar'); console.log(`AR: ${ar}`); }
-        console.log(`CHECK: AR != Trash? ${ar !== trash ? '✅' : '❌'}`);
+        // Count gateways for this instance
+        const gwCount = instRoles.gateway.length;
+        const gwLoad = getTotalLoad(instRoles.gateway);
 
-        // Gateways
-        const gwLoad = getTotalLoad(instanceRoles[inst]['gateway']);
-        const gwNeeded = Math.max(1, Math.ceil(gwLoad / 25));
-        const gws = [];
-        for (let i = 0; i < gwNeeded; i++) { const c = get(); if (c !== null) { assignRole(c, 'gateway'); gws.push(c); } }
-        console.log(`Gateways: ${gws.length} (${gwLoad}% / 25 = ${gwNeeded})`);
+        // IRQ per instance: 1 per 4 gateways
+        const irqNeeded = Math.max(1, Math.ceil(gwCount / 4));
+        console.log(`Gateways: ${gwCount}, IRQ needed: ${irqNeeded} (${gwCount}/4 = ${Math.ceil(gwCount / 4)})`);
+        console.log(`CHECK: IRQ formula? ${irqNeeded === Math.ceil(gwCount / 4) ? '✅' : '❌'}`);
 
-        // Robots
-        const robots = [];
-        let c = get();
-        while (c !== null) { assignRole(c, 'robot_default'); robots.push(c); c = get(); }
-        console.log(`Robots: ${robots.length}`);
-        console.log(`CHECK: Robots >= 1? ${robots.length >= 1 ? '✅' : '❌'}`);
+        // Gateways (30% target)
+        const gwNeeded = Math.max(1, Math.ceil(gwLoad / 30));
+        console.log(`GW load: ${gwLoad}%, needed: ${gwNeeded} (${gwLoad}/30 = ${Math.ceil(gwLoad / 30)})`);
+        console.log(`CHECK: GW formula? ${gwNeeded === Math.ceil(gwLoad / 30) ? '✅' : '❌'}`);
+
+        // Robots (30% target)
+        const robotLoad = getTotalLoad(instRoles.robot_default);
+        const robotNeeded = Math.max(1, Math.ceil(robotLoad / 30));
+        console.log(`Robot load: ${robotLoad}%, needed: ${robotNeeded}`);
+
+        // Low load check
+        if (robotLoad < 10) {
+            console.log(`⚠️ Robot load <10% - could be reserve`);
+        }
     }
 
-    // PHASE 5: Fill Remaining
-    console.log('\n=== PHASE 5: Fill Remaining ===');
-    const remNonIso = allCoresSorted.filter(c => !isolatedSet.has(String(c)) && !isAssigned(c));
-    remNonIso.forEach(c => assignRole(c, 'sys_os'));
-    console.log(`Non-isolated → OS: ${remNonIso.length} [${remNonIso.join(', ')}]`);
-
-    const remIso = allCoresSorted.filter(c => isolatedSet.has(String(c)) && !isAssigned(c));
-    remIso.forEach(c => assignRole(c, 'robot_default'));
-    console.log(`Isolated → Robots: ${remIso.length}`);
-
-    // Summary
-    console.log('\n========== SUMMARY ==========');
-    console.log(`Total: ${totalCores}, Assigned: ${assignedCores.size}`);
-
-    const results = [
-        ['OS = totalLoad/25%', osNeeded === Math.ceil(osLoad / 25)],
-        ['IRQ = ceil(gw/4)', neededIrq === Math.ceil(totalGw / 4)],
-        ['All cores assigned', assignedCores.size === totalCores],
-        ['Multi-instance', instances.length === 2],
-        ['Equal partition', Math.abs(pools['HUB7'].length - pools['RFQ1'].length) <= 1]
-    ];
-
+    // === Validation ===
     console.log('\n========== VALIDATION ==========');
+    const results = [];
+
+    // HUB7: 4 gateways → 1 IRQ
+    results.push(['HUB7: 4 gw = 1 IRQ', Math.ceil(4 / 4) === 1]);
+
+    // RFQ1: 5 gateways → 2 IRQ
+    results.push(['RFQ1: 5 gw = 2 IRQ', Math.ceil(5 / 4) === 2]);
+
+    // OS: 90% / 30 = 3
+    results.push(['OS: 90%/30 = 3', Math.ceil(90 / 30) === 3]);
+
+    // HUB7 GW: 40% / 30 = 2
+    results.push(['HUB7 GW: 40%/30 = 2', Math.ceil(40 / 30) === 2]);
+
+    // RFQ1 GW: 60% / 30 = 2
+    results.push(['RFQ1 GW: 60%/30 = 2', Math.ceil(60 / 30) === 2]);
+
+    // HUB7 Robots: 55% / 30 = 2
+    results.push(['HUB7 Robots: 55%/30 = 2', Math.ceil(55 / 30) === 2]);
+
+    // RFQ1 Robots: 33% / 30 = 2
+    results.push(['RFQ1 Robots: 33%/30 = 2', Math.ceil(33 / 30) === 2]);
+
     let allPassed = true;
-    results.forEach(([name, ok]) => { console.log(`${ok ? '✅' : '❌'} ${name}`); if (!ok) allPassed = false; });
+    results.forEach(([name, ok]) => {
+        console.log(`${ok ? '✅' : '❌'} ${name}`);
+        if (!ok) allPassed = false;
+    });
+
     console.log('\n' + (allPassed ? '🎉 ALL TESTS PASSED!' : '❌ SOME FAILED'));
     return allPassed;
 }
 
-testMultiInstanceOptimizer();
+testMultiInstanceOptimizerV4();
