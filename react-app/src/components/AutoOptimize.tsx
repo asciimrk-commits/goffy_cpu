@@ -130,42 +130,6 @@ export function AutoOptimize() {
             return Math.max(1, Math.ceil(load / target));
         };
 
-        // --- SHARED RESOURCES (OS, IRQ) ---
-
-        // OS
-        const osLoad = getLoad('sys_os');
-        // If current OS load is 0 (missing data), assume minimal safety (2 cores)
-        const osNeeded = osLoad === 0 ? 2 : calcNeeded(osLoad, 25);
-        const osCores = popCore(netPool, Math.min(osNeeded, 4)); // Cap at 4
-
-        recs.push({
-            title: 'Shared OS',
-            instance: 'Global',
-            role: 'sys_os',
-            cores: osCores,
-            description: `${osCores.length} cores`,
-            rationale: `Load: ${osLoad.toFixed(0)}%`
-        });
-
-        // IRQ
-        // Count TOTAL gateways across all instances to determine IRQ count
-        let totalGateways = 0;
-        detectedInstances.forEach(i => {
-            totalGateways += (instances[i]?.['gateway']?.length || 0);
-        });
-        // Logic: 1-4 gw -> 1 irq. 5-8 -> 2.
-        const irqNeeded = Math.ceil(Math.max(1, totalGateways) / 4);
-        const irqCores = popCore(netPool, irqNeeded);
-
-        recs.push({
-            title: 'Shared IRQ',
-            instance: 'Global',
-            role: 'net_irq',
-            cores: irqCores,
-            description: `${irqCores.length} cores`,
-            rationale: `Gateways: ${totalGateways}`
-        });
-
         // Mark SHARED ownership
         const ownership: Record<string, Set<number>> = {};
         const proposedByInst: Record<string, Record<string, string[]>> = {};
@@ -181,78 +145,123 @@ export function AutoOptimize() {
             });
         };
 
-        // Register Shared
-        // We register them to 'Global' or to ALL instances?
-        // User: "used by N services simultaneously".
-        // Let's register to ALL detected instances so they show up.
-        detectedInstances.forEach(inst => {
-            register(inst, 'sys_os', osCores);
-            register(inst, 'net_irq', irqCores);
+        // --- SHARED RESOURCES (OS, IRQ) ---
+
+        // OS: Global Load
+        const osLoad = getLoad('sys_os');
+        const osNeeded = Math.max(2, calcNeeded(osLoad, 25)); // Min 2 cores for OS safety
+        const osCores = popCore(netPool, Math.min(osNeeded, 4));
+
+        register('Shared', 'sys_os', osCores);
+        recs.push({ title: 'Shared OS', instance: 'Global', role: 'sys_os', cores: osCores, description: `${osCores.length} cores`, rationale: `Load: ${osLoad.toFixed(1)}%` });
+
+        // IRQ: Based on Total Gateways
+        let totalGateways = 0;
+        detectedInstances.forEach(i => {
+            totalGateways += (instances[i]?.['gateway']?.length || 0);
         });
+        const irqNeeded = Math.ceil(Math.max(totalGateways, 1) / 4); // 1 per 4 GW
+        const irqCores = popCore(netPool, irqNeeded);
+
+        register('Shared', 'net_irq', irqCores);
+        recs.push({ title: 'Shared IRQ', instance: 'Global', role: 'net_irq', cores: irqCores, description: `${irqCores.length} cores`, rationale: `${totalGateways} Gateways` });
 
         // --- SEGREGATED RESOURCES (Per Instance) ---
 
         detectedInstances.forEach(inst => {
-            // Check existence in input
-            const myRoles = instances[inst] || {};
-            const hasRf = (myRoles['rf']?.length || 0) > 0;
-            const hasClick = (myRoles['click']?.length || 0) > 0;
-            // The user said: "Trash, AR-RF, UDP mandatory".
+            if (inst === 'Shared') return;
 
-            // 1. Network Services (Net Pool)
+            const myRoles = instances[inst] || {};
+
+            // 1. Mandatory Services (1 Core Each, Net Pool)
+            // Trash
             const trashCores = popCore(netPool, 1);
             register(inst, 'trash', trashCores);
-            if (hasClick) register(inst, 'click', trashCores); // Co-locate?
-            recs.push({ title: 'Trash', instance: inst, role: 'trash', cores: trashCores, description: '1 core' });
+            recs.push({ title: 'Trash', instance: inst, role: 'trash', cores: trashCores, description: 'Mandatory', rationale: 'Single/Unique' });
 
+            // UDP
             const udpCores = popCore(netPool, 1);
             register(inst, 'udp', udpCores);
-            recs.push({ title: 'UDP', instance: inst, role: 'udp', cores: udpCores, description: '1 core' });
+            recs.push({ title: 'UDP', instance: inst, role: 'udp', cores: udpCores, description: 'Mandatory' });
 
-            // AR/RF/Formula
-            const arCores = popCore(netPool, 1); // 1 core for AR+RF
+            // AR (AllRobotsTh) - Mandatory
+            const arCores = popCore(netPool, 1);
             register(inst, 'ar', arCores);
-            if (hasRf) register(inst, 'rf', arCores);
-            if (myRoles['formula']) register(inst, 'formula', arCores);
-            recs.push({ title: 'AR/RF', instance: inst, role: 'ar', cores: arCores, description: '1 core' });
+            recs.push({ title: 'AR/RF', instance: inst, role: 'ar', cores: arCores, description: 'Mandatory' });
 
-            // 2. Gateways (Net Pool)
+            // 2. Optional Services (Check Input)
+            // ClickHouse
+            if ((myRoles['click']?.length || 0) > 0) {
+                const clickCores = popCore(netPool, 1);
+                register(inst, 'click', clickCores);
+                recs.push({ title: 'ClickHouse', instance: inst, role: 'click', cores: clickCores, description: 'Optional (Detected)' });
+            }
+            // Formula
+            if ((myRoles['formula']?.length || 0) > 0) {
+                const formCores = popCore(netPool, 1);
+                register(inst, 'formula', formCores);
+                recs.push({ title: 'Formula', instance: inst, role: 'formula', cores: formCores, description: 'Optional (Detected)' });
+            }
+
+            // 3. Scaled Services
+            // Gateways (Net Pool)
             const gwLoad = getLoad('gateway', inst);
-            const gwNeeded = calcNeeded(gwLoad, 25);
-            // The user previously said "+2 buffer", but now "target 20-30%".
-            // "math calculate how many necessary considering current load and striving to 20-30%".
-            // If we use calcNeeded with 25%, that satisfies the requirement. No explicit buffer mention in NEW prompt.
+            const gwNeeded = Math.max(1, calcNeeded(gwLoad, 25)); // Min 1
             const gwCores = popCore(netPool, gwNeeded);
             register(inst, 'gateway', gwCores);
-            recs.push({ title: 'Gateways', instance: inst, role: 'gateway', cores: gwCores, description: `${gwCores.length} cores`, rationale: `Load ${gwLoad.toFixed(0)}%` });
+            recs.push({ title: 'Gateways', instance: inst, role: 'gateway', cores: gwCores, description: `${gwCores.length} cores`, rationale: `Load ${gwLoad.toFixed(1)}% (Target 25%)` });
 
-            // 3. Robots (Compute Pool)
-            // Use compute pool first, spill to Net if needed
+            // Robots (Compute Pool)
             const robotLoad = getLoad('robot_default', inst)
                 + getLoad('isolated_robots', inst)
                 + getLoad('pool1', inst)
                 + getLoad('pool2', inst);
 
-            const robotNeeded = calcNeeded(robotLoad, 25);
+            const robotNeeded = Math.max(1, calcNeeded(robotLoad, 25)); // Min 1
 
-            // Try Compute Pool
+            // Use Compute Pool first
             let robotCores = popCore(computePool, robotNeeded);
-            // Spill to Net if needed
+            // Spillover
             if (robotCores.length < robotNeeded) {
                 const needed = robotNeeded - robotCores.length;
                 const extra = popCore(netPool, needed);
                 robotCores = [...robotCores, ...extra];
             }
 
-            // Assign generic 'robot_default' or split?
-            // If input had 'isolated', preserve it? 
-            // User: "evaluate load on EACH pool ... (pool gates, pool robots...)".
-            // This implies we treat all robots as one big pool for calculation, OR check specific pools?
-            // "Optional: Clickhouse, Isolated, Formula... others mandatory"
-            // Let's assign to 'robot_default' generally.
             register(inst, 'robot_default', robotCores);
-            recs.push({ title: 'Robots', instance: inst, role: 'robot_default', cores: robotCores, description: `${robotCores.length} cores`, rationale: `Load ${robotLoad.toFixed(0)}%` });
+            recs.push({ title: 'Robots (All Pools)', instance: inst, role: 'robot_default', cores: robotCores, description: `${robotCores.length} cores`, rationale: `Load ${robotLoad.toFixed(1)}% (Target 25%)` });
         });
+
+        // Flatten ownership for visualization
+        // OS/IRQ are in 'Shared' bucket from register step
+        // We need to map 'Shared' ownership in a way that visualizer understands
+        // "Intersection": The visualizer looks for `uniqueOwners`.
+        // If we want Shared IS Intersection, then `Shared` cores should be added to ALL instances?
+        // User said: "(Shared) will be used by N services simultaneously"
+        // So yes, logically they belong to everyone.
+
+        // Post-process 'Shared' ownership
+        if (proposedByInst['Shared']) {
+            Object.keys(proposedByInst['Shared']).forEach(coreId => {
+                detectedInstances.forEach(inst => {
+                    // Add shared cores to every instance's allocation map
+                    // But don't duplicate role entries if unnecessary
+                    // Visualization checks `instanceOwnership`.
+
+                    // We just update `ownership` set
+                    if (!ownership[inst]) ownership[inst] = new Set();
+                    ownership[inst].add(parseInt(coreId));
+
+                    // And proposedByInst for role lookup
+                    if (!proposedByInst[inst]) proposedByInst[inst] = {};
+                    if (!proposedByInst[inst][coreId]) proposedByInst[inst][coreId] = [];
+                    const sharedRoles = proposedByInst['Shared'][coreId];
+                    sharedRoles.forEach(r => {
+                        if (!proposedByInst[inst][coreId].includes(r)) proposedByInst[inst][coreId].push(r);
+                    });
+                });
+            });
+        }
 
         setRecommendations(recs);
         setProposedAllocation(proposedByInst);

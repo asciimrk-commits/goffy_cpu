@@ -350,26 +350,30 @@ input:focus {
 /* L3 Group Visualization */
 .l3-group {
   background: var(--bg-input);
-  /* subtle contrast */
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 8px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  transition: all 0.2s ease;
+  gap: 8px;
+  min-width: 140px;
+  /* Ensure wide enough for header */
 }
 
 .l3-group:hover {
   border-color: var(--accent-color);
+  background: rgba(var(--accent-color-rgb), 0.05);
+  /* Needs rgb var or hardcoded */
 }
 
 .l3-header {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 0.8rem;
+  color: var(--text-main);
+  font-weight: 700;
+  opacity: 0.8;
+  border-bottom: 2px solid var(--border-color);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
 }
 
 .l3-cores {
@@ -379,18 +383,19 @@ input:focus {
 }
 
 .core {
-  width: 36px;
-  height: 36px;
-  font-size: 12px;
+  width: 40px;
+  height: 40px;
+  font-size: 13px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
+  /* Hardcoded 4px for consistency */
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: 'JetBrains Mono', monospace;
-  font-weight: 500;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  transition: transform 0.1s, box-shadow 0.1s;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  color: #fff;
 }
 
 .core:hover {
