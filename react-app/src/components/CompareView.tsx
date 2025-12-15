@@ -269,6 +269,9 @@ export function CompareView() {
     color: 'var(--text-primary)'
   };
 
+  // State for collapsible sections
+  const [inputsExpanded, setInputsExpanded] = useState(true);
+
   return (
     <div style={{
       display: 'flex',
@@ -278,97 +281,137 @@ export function CompareView() {
       padding: '16px',
       gap: '16px'
     }}>
-      {/* Input Section */}
+      {/* Collapsible Input Section */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: '16px',
+        background: 'var(--bg-panel)',
+        borderRadius: '12px',
+        overflow: 'hidden',
         flexShrink: 0
       }}>
-        {/* Old Config Input */}
-        <div style={inputCardStyle}>
-          <div style={{ fontWeight: 600, fontSize: '13px', color: '#f59e0b' }}>OLD Config</div>
-          <div style={inputRowStyle}>
-            <input
-              type="text"
-              placeholder="Server name (old)"
-              style={serverInputStyle}
-              value={oldServerName}
-              onChange={(e) => setOldServerName(e.target.value)}
-            />
-            <input
-              type="file"
-              ref={oldFileRef}
-              onChange={handleFileLoad('old')}
-              accept=".txt,.log,.sh,.yaml,.yml"
-              style={{ display: 'none' }}
-            />
-            <button
-              className="btn-ghost"
-              style={{ padding: '8px 12px', fontSize: '11px' }}
-              onClick={() => oldFileRef.current?.click()}
-            >
-              Load File
-            </button>
+        {/* Header - clickable to collapse */}
+        <div
+          onClick={() => setInputsExpanded(!inputsExpanded)}
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 16px',
+            cursor: 'pointer',
+            background: 'var(--bg-input)',
+            borderBottom: inputsExpanded ? '1px solid var(--border-color)' : 'none'
+          }}
+        >
+          <div style={{ fontWeight: 600, fontSize: '14px' }}>
+            📥 Загрузка конфигураций
           </div>
-          <textarea
-            value={oldText}
-            onChange={(e) => setOldText(e.target.value)}
-            placeholder="Paste cpu-map.sh output or load file..."
-            style={textareaStyle}
-          />
-          <button
-            className="btn-primary"
-            style={{ padding: '10px', fontSize: '12px' }}
-            onClick={() => handleParse('old')}
-          >
-            Parse Old
-          </button>
+          <div style={{
+            transform: inputsExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s'
+          }}>
+            ▼
+          </div>
         </div>
 
-        {/* New Config Input */}
-        <div style={inputCardStyle}>
-          <div style={{ fontWeight: 600, fontSize: '13px', color: '#10b981' }}>NEW Config</div>
-          <div style={inputRowStyle}>
-            <input
-              type="text"
-              placeholder="Server name (new)"
-              style={serverInputStyle}
-              value={newServerName}
-              onChange={(e) => setNewServerName(e.target.value)}
-            />
-            <input
-              type="file"
-              ref={newFileRef}
-              onChange={handleFileLoad('new')}
-              accept=".txt,.log,.sh,.yaml,.yml"
-              style={{ display: 'none' }}
-            />
-            <button
-              className="btn-ghost"
-              style={{ padding: '8px 12px', fontSize: '11px' }}
-              onClick={() => newFileRef.current?.click()}
-            >
-              Load File
-            </button>
+        {/* Collapsible content */}
+        {inputsExpanded && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '16px',
+            padding: '16px'
+          }}>
+            {/* Old Config Input */}
+            <div style={inputCardStyle}>
+              <div style={{ fontWeight: 600, fontSize: '13px', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ background: '#f59e0b', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '11px' }}>OLD</span>
+                {oldConfig && <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>✓ Загружено</span>}
+              </div>
+              <div style={inputRowStyle}>
+                <input
+                  type="text"
+                  placeholder="Server name (old)"
+                  style={serverInputStyle}
+                  value={oldServerName}
+                  onChange={(e) => setOldServerName(e.target.value)}
+                />
+                <input
+                  type="file"
+                  ref={oldFileRef}
+                  onChange={handleFileLoad('old')}
+                  accept=".txt,.log,.sh,.yaml,.yml"
+                  style={{ display: 'none' }}
+                />
+                <button
+                  className="btn-ghost"
+                  style={{ padding: '8px 12px', fontSize: '11px' }}
+                  onClick={() => oldFileRef.current?.click()}
+                >
+                  📁 File
+                </button>
+              </div>
+              <textarea
+                value={oldText}
+                onChange={(e) => setOldText(e.target.value)}
+                placeholder="Вставьте сюда вывод cpu-map.sh или Bender YAML конфиг..."
+                style={{ ...textareaStyle, minHeight: '100px' }}
+              />
+              <button
+                className="btn-primary"
+                style={{ padding: '10px', fontSize: '12px' }}
+                onClick={() => handleParse('old')}
+              >
+                Parse Old
+              </button>
+            </div>
+
+            {/* New Config Input */}
+            <div style={inputCardStyle}>
+              <div style={{ fontWeight: 600, fontSize: '13px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ background: '#10b981', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '11px' }}>NEW</span>
+                {newConfig && <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>✓ Загружено</span>}
+              </div>
+              <div style={inputRowStyle}>
+                <input
+                  type="text"
+                  placeholder="Server name (new)"
+                  style={serverInputStyle}
+                  value={newServerName}
+                  onChange={(e) => setNewServerName(e.target.value)}
+                />
+                <input
+                  type="file"
+                  ref={newFileRef}
+                  onChange={handleFileLoad('new')}
+                  accept=".txt,.log,.sh,.yaml,.yml"
+                  style={{ display: 'none' }}
+                />
+                <button
+                  className="btn-ghost"
+                  style={{ padding: '8px 12px', fontSize: '11px' }}
+                  onClick={() => newFileRef.current?.click()}
+                >
+                  📁 File
+                </button>
+              </div>
+              <textarea
+                value={newText}
+                onChange={(e) => setNewText(e.target.value)}
+                placeholder="Вставьте сюда вывод cpu-map.sh или Bender YAML конфиг..."
+                style={{ ...textareaStyle, minHeight: '100px' }}
+              />
+              <button
+                className="btn-primary"
+                style={{ padding: '10px', fontSize: '12px' }}
+                onClick={() => handleParse('new')}
+              >
+                Parse New
+              </button>
+            </div>
           </div>
-          <textarea
-            value={newText}
-            onChange={(e) => setNewText(e.target.value)}
-            placeholder="Paste cpu-map.sh output or load file..."
-            style={textareaStyle}
-          />
-          <button
-            className="btn-primary"
-            style={{ padding: '10px', fontSize: '12px' }}
-            onClick={() => handleParse('new')}
-          >
-            Parse New
-          </button>
-        </div>
+        )}
       </div>
 
-      {/* Results Section */}
+      {/* Results Section - now takes more space */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
