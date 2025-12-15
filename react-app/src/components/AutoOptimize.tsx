@@ -55,6 +55,7 @@ export function AutoOptimize() {
     const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
     const [instanceOwnership, setInstanceOwnership] = useState<Record<string, Set<number>>>({});
     const [instColors, setInstColors] = useState<Record<string, string>>(INSTANCE_COLORS);
+    const [proposedAllocation, setProposedAllocation] = useState<Record<string, Record<string, string[]>> | null>(null);
 
     const generateOptimization = () => {
         if (Object.keys(geometry).length === 0) {
@@ -78,6 +79,7 @@ export function AutoOptimize() {
         const recs: Recommendation[] = [];
         const ownership: Record<string, Set<number>> = {};
         const newInstColors = { ...INSTANCE_COLORS };
+        const proposedByInstance: Record<string, Record<string, string[]>> = {};
 
         const assignRole = (cpu: string, role: string, inst: string) => {
             if (!proposed[cpu]) proposed[cpu] = [];
@@ -85,6 +87,10 @@ export function AutoOptimize() {
 
             if (!ownership[inst]) ownership[inst] = new Set();
             ownership[inst].add(parseInt(cpu));
+
+            if (!proposedByInstance[inst]) proposedByInstance[inst] = {};
+            if (!proposedByInstance[inst][cpu]) proposedByInstance[inst][cpu] = [];
+            if (!proposedByInstance[inst][cpu].includes(role)) proposedByInstance[inst][cpu].push(role);
         };
         const isAssigned = (cpu: string) => (proposed[cpu]?.length || 0) > 0;
 
@@ -199,9 +205,9 @@ export function AutoOptimize() {
 
         osCandidates.forEach(c => assignRole(c, 'sys_os', 'OS'));
         recs.push({
-            title: '🖥️ OS',
+            title: 'OS',
             cores: osCandidates,
-            description: `${osCandidates.length} ядер`,
+            description: `${osCandidates.length} cores`,
             role: 'sys_os',
             rationale: `Target 25% load`,
             instance: 'OS'
@@ -230,7 +236,7 @@ export function AutoOptimize() {
             const irqCores = popNet(d.irq);
             irqCores.forEach(c => assignRole(c, 'net_irq', d.name));
             recs.push({
-                title: '⚡ IRQ',
+                title: 'IRQ',
                 cores: irqCores,
                 description: `${irqCores.length} ядер`,
                 role: 'net_irq',
@@ -242,7 +248,7 @@ export function AutoOptimize() {
             const gwCores = popNet(d.gateways);
             gwCores.forEach(c => assignRole(c, 'gateway', d.name));
             recs.push({
-                title: '🚪 Gateways',
+                title: 'Gateways',
                 cores: gwCores,
                 description: `${gwCores.length} ядер`,
                 role: 'gateway',
@@ -254,7 +260,7 @@ export function AutoOptimize() {
             const udpCores = popNet(1);
             udpCores.forEach(c => assignRole(c, 'udp', d.name));
             recs.push({
-                title: '📡 UDP',
+                title: 'UDP',
                 cores: udpCores,
                 description: '1 ядро',
                 role: 'udp',
@@ -271,7 +277,7 @@ export function AutoOptimize() {
                 assignRole(c, 'click', d.name);
             });
             recs.push({
-                title: '🗑️ Trash+RF+Click',
+                title: 'Trash+RF+Click',
                 cores: trashCores,
                 description: '1 ядро',
                 role: 'trash',
@@ -288,7 +294,7 @@ export function AutoOptimize() {
                     if (d.formula) assignRole(c, 'formula', d.name);
                 });
                 recs.push({
-                    title: '🔄 AR+Formula',
+                    title: 'AR+Formula',
                     cores: arCores,
                     description: '1 ядро',
                     role: 'ar',
@@ -336,9 +342,9 @@ export function AutoOptimize() {
             if (taken.length > 0) {
                 taken.forEach(c => assignRole(c, 'robot_default', d.name));
                 recs.push({
-                    title: '🤖 Robots',
+                    title: 'Robots',
                     cores: taken,
-                    description: `${taken.length} ядер`,
+                    description: `${taken.length} cores`,
                     role: 'robot_default',
                     rationale: `Target 25%`,
                     instance: d.name
@@ -376,18 +382,15 @@ export function AutoOptimize() {
         setInstColors(newInstColors);
         setInstanceOwnership(ownership);
         setRecommendations(recs);
-        setResult(`Optimization V10 Complete. Net NUMA: ${netNuma}`);
+        setProposedAllocation(proposedByInstance);
+        setResult(`Optimization Complete. Net NUMA: ${netNuma}`);
     };
 
     const applyRecommendations = () => {
-        const proposed: Record<string, string[]> = {};
-        recommendations.forEach(rec => {
-            rec.cores.forEach(c => {
-                if (!proposed[c]) proposed[c] = [];
-                if (!proposed[c].includes(rec.role)) proposed[c].push(rec.role);
-            });
-        });
-        setInstances({ Physical: proposed });
+        if (!proposedAllocation) return;
+        const config: any = { ...proposedAllocation };
+        if (!config.Physical) config.Physical = {};
+        setInstances(config);
         setResult('Applied!');
     };
 
@@ -465,12 +468,11 @@ export function AutoOptimize() {
     return (
         <div className="optimize-container">
             <div className="optimize-header">
-                <h2>[AUTO-OPTIMIZATION ENGINE v10]</h2>
-                <p>Gateway Buffer (+2) • Net Placement (Trash/AR) • Co-location Rules</p>
+                <h2>[AUTO-OPTIMIZATION ENGINE]</h2>
             </div>
 
             <div className="optimize-actions">
-                <button className="btn btn-primary btn-lg" onClick={generateOptimization}>GENERATE v10</button>
+                <button className="btn btn-primary btn-lg" onClick={generateOptimization}>GENERATE</button>
                 {recommendations.length > 0 && <button className="btn btn-secondary" onClick={applyRecommendations}>APPLY</button>}
             </div>
 
@@ -493,7 +495,7 @@ export function AutoOptimize() {
                                     {rec.cores.length > 0 && (
                                         <div className="recommend-cores">
                                             {rec.cores.map(c => (
-                                                <span key={c} className="recommend-core" style={{ backgroundColor: instColors[instName] || '#64748b' }}>{c}</span>
+                                                <span key={c} className="recommend-core" style={{ backgroundColor: instColors[instName] || '#64748b' }} title={`Instance: ${instName}`}>{c}</span>
                                             ))}
                                         </div>
                                     )}
