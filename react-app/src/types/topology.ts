@@ -27,6 +27,7 @@ export interface RoleDefinition {
 
 export interface InstanceConfig {
     Physical: { [cpuId: string]: string[] };
+    [instanceName: string]: { [cpuId: string]: string[] };
 }
 
 export interface TopologyState {

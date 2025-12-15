@@ -106,21 +106,21 @@ export function parseTopology(text: string): ParseResult {
                     const cpu = parseInt(cpuMatch[1]);
                     const cpuStr = String(cpu);
 
-                    // Extract server name from [NAME] pattern if not already set
-                    if (!result.serverName) {
-                        const nameMatch = trimmed.match(/\[([A-Z0-9]+)\]/);
-                        if (nameMatch) {
-                            result.serverName = nameMatch[1];
-                        }
-                    }
-
-                    // Find role assignments
-                    const rolePattern = /['"]?(\w+)['"]?\s*:\s*\[/g;
+                    // Find role assignments with instance names
+                    // Pattern: RoleName:[INSTANCE] or RoleName:[value]
+                    const roleInstancePattern = /['"]?(\w+)['"]?\s*:\s*\[([^\]]+)\]/g;
                     let match;
-                    while ((match = rolePattern.exec(trimmed)) !== null) {
+                    while ((match = roleInstancePattern.exec(trimmed)) !== null) {
                         const benderName = match[1];
+                        const instanceValue = match[2];
+
                         if (['cpu_id', 'isolated'].includes(benderName)) continue;
 
+                        // Check if instanceValue is an instance name (uppercase letters/numbers)
+                        const instanceMatch = instanceValue.match(/^([A-Z][A-Z0-9]+)$/);
+                        const instanceName = instanceMatch ? instanceMatch[1] : null;
+
+                        // Handle net_cpu specially (shared IRQ)
                         if (benderName === 'net_cpu') {
                             if (!result.instances.Physical[cpuStr]) result.instances.Physical[cpuStr] = [];
                             if (!result.instances.Physical[cpuStr].includes('net_irq')) {
@@ -131,9 +131,23 @@ export function parseTopology(text: string): ParseResult {
 
                         const roleId = BENDER_TO_ROLE[benderName];
                         if (roleId) {
+                            // Store in Physical for backward compat
                             if (!result.instances.Physical[cpuStr]) result.instances.Physical[cpuStr] = [];
                             if (!result.instances.Physical[cpuStr].includes(roleId)) {
                                 result.instances.Physical[cpuStr].push(roleId);
+                            }
+
+                            // Also store per-instance if we detected an instance name
+                            if (instanceName) {
+                                if (!result.instances[instanceName]) {
+                                    result.instances[instanceName] = {};
+                                }
+                                if (!result.instances[instanceName][cpuStr]) {
+                                    result.instances[instanceName][cpuStr] = [];
+                                }
+                                if (!result.instances[instanceName][cpuStr].includes(roleId)) {
+                                    result.instances[instanceName][cpuStr].push(roleId);
+                                }
                             }
                         }
                     }

@@ -9,17 +9,19 @@ interface Recommendation {
     role: string;
     rationale?: string;
     warning?: string | null;
-    instance?: string;
+    instance: string;
 }
 
-interface InstanceAllocation {
+interface InstanceBudget {
     name: string;
     trash: number | null;
+    click: number | null;
     udp: number | null;
     ar: number | null;
     irq: number[];
     gateways: number[];
     robots: number[];
+    formula: number | null;
     reserve: number[];
 }
 
@@ -27,7 +29,6 @@ export function AutoOptimize() {
     const {
         geometry,
         isolatedCores,
-
         instances,
         setInstances,
     } = useAppStore();
@@ -47,92 +48,69 @@ export function AutoOptimize() {
         // === Helper Functions ===
         const getTotalLoad = (cores: (string | number)[]): number => {
             if (!cores?.length) return 0;
-            return cores.reduce((sum: number, c) => sum + (coreLoads[typeof c === 'string' ? parseInt(c) : c] || 0), 0);
+            return cores.reduce((sum: number, c) => {
+                const load = coreLoads[typeof c === 'string' ? parseInt(c) : c] || 0;
+                return sum + load;
+            }, 0);
         };
 
-        // Analyze topology
-        const byNuma: Record<string, number[]> = {};
+        // All cores sorted
+        const allCores: number[] = [];
         Object.entries(geometry).forEach(([, numaData]) => {
-            Object.entries(numaData).forEach(([numaId, l3Data]) => {
-                if (!byNuma[numaId]) byNuma[numaId] = [];
+            Object.entries(numaData).forEach(([, l3Data]) => {
                 Object.entries(l3Data).forEach(([, cores]) => {
-                    byNuma[numaId].push(...cores);
+                    allCores.push(...cores);
                 });
             });
         });
+        allCores.sort((a, b) => a - b);
+        const totalCores = allCores.length;
 
-        const allCoresSorted = Object.values(byNuma).flat().sort((a, b) => a - b);
-        const totalCores = allCoresSorted.length;
-
-        // === Parse Instance-Specific Roles ===
+        // === Step 1: Detect Instances from parsed data ===
         const detectedInstances: string[] = [];
-        const instanceRoles: Record<string, Record<string, string[]>> = {};
+        const instanceCores: Record<string, Record<string, string[]>> = {};
 
-        // Scan Physical for instance tags
-        Object.entries(instances.Physical || {}).forEach(([, tags]) => {
-            tags.forEach((tag: string) => {
-                // Check if tag contains instance pattern
-                const instMatch = tag.match(/\[([A-Z0-9]+)\]/);
-                if (instMatch) {
-                    const instName = instMatch[1];
-                    if (!detectedInstances.includes(instName)) {
-                        detectedInstances.push(instName);
-                        instanceRoles[instName] = {};
+        Object.entries(instances).forEach(([instName, cpuMap]) => {
+            if (instName === 'Physical') return;
+            if (cpuMap && Object.keys(cpuMap).length > 0) {
+                detectedInstances.push(instName);
+                instanceCores[instName] = {};
+
+                Object.entries(cpuMap).forEach(([cpu, roles]) => {
+                    if (Array.isArray(roles)) {
+                        roles.forEach((role: string) => {
+                            if (!instanceCores[instName][role]) {
+                                instanceCores[instName][role] = [];
+                            }
+                            instanceCores[instName][role].push(cpu);
+                        });
                     }
-                }
-            });
-        });
-
-        // If no instances found, parse from current roles mapping
-        if (detectedInstances.length === 0) {
-            // Try to detect from existing role structure
-            const instanceEntries = Object.entries(instances) as [string, Record<string, string[]>][];
-            instanceEntries.forEach(([instName, cpuMap]) => {
-                if (instName !== 'Physical' && cpuMap && Object.keys(cpuMap).length > 0) {
-                    detectedInstances.push(instName);
-                    instanceRoles[instName] = {};
-                    Object.entries(cpuMap).forEach(([cpu, tags]) => {
-                        if (Array.isArray(tags)) {
-                            tags.forEach((t: string) => {
-                                if (!instanceRoles[instName][t]) instanceRoles[instName][t] = [];
-                                instanceRoles[instName][t].push(cpu);
-                            });
-                        }
-                    });
-                }
-            });
-        }
-
-        // Fallback to Physical as single instance
-        if (detectedInstances.length === 0) {
-            detectedInstances.push('Physical');
-        }
-
-        // Collect all current roles from Physical
-        const currentRoles: Record<string, string[]> = {};
-        Object.entries(instances.Physical || {}).forEach(([cpu, tags]) => {
-            tags.forEach((t: string) => {
-                if (!currentRoles[t]) currentRoles[t] = [];
-                currentRoles[t].push(cpu);
-            });
-        });
-
-        // Use current roles if instanceRoles empty
-        detectedInstances.forEach(inst => {
-            if (!instanceRoles[inst] || Object.keys(instanceRoles[inst]).length === 0) {
-                instanceRoles[inst] = currentRoles;
+                });
             }
         });
+
+        // Fallback if no named instances
+        if (detectedInstances.length === 0) {
+            detectedInstances.push('Physical');
+            instanceCores['Physical'] = {};
+            Object.entries(instances.Physical || {}).forEach(([cpu, roles]) => {
+                roles.forEach((role: string) => {
+                    if (!instanceCores['Physical'][role]) {
+                        instanceCores['Physical'][role] = [];
+                    }
+                    instanceCores['Physical'][role].push(cpu);
+                });
+            });
+        }
 
         const proposed: Record<string, string[]> = {};
         const recs: Recommendation[] = [];
         const assignedCores = new Set<number>();
 
-        const assignRole = (cpu: number | string, role: string, _instance?: string) => {
+        const assignRole = (cpu: number | string, role: string) => {
             const cpuNum = typeof cpu === 'string' ? parseInt(cpu) : cpu;
             const cpuStr = String(cpuNum);
             if (!proposed[cpuStr]) proposed[cpuStr] = [];
-
             if (!proposed[cpuStr].includes(role)) proposed[cpuStr].push(role);
             assignedCores.add(cpuNum);
         };
@@ -141,18 +119,18 @@ export function AutoOptimize() {
             return assignedCores.has(cpuNum);
         };
 
-        // === PHASE 1: OS Cores (Shared) ===
-        // Target 30%, consecutive from 0
-        const osCoresAvailable = allCoresSorted.filter(c => !isolatedSet.has(String(c)));
-        const osLoad = getTotalLoad(currentRoles['sys_os'] || osCoresAvailable.map(String));
+        // === Step 2: Calculate OS (non-isolated cores) ===
+        // Cores without isolation = OS cores
+        const currentOsCores = allCores.filter(c => !isolatedSet.has(String(c)));
+        const osLoad = getTotalLoad(currentOsCores);
+
+        // Target 30% per core
         let osNeeded = osLoad > 0
-            ? Math.max(1, Math.ceil(osLoad / 30))  // target 30%
-            : Math.max(1, Math.min(3, osCoresAvailable.length));
+            ? Math.max(1, Math.ceil(osLoad / 30))
+            : Math.max(1, Math.min(4, currentOsCores.length));
 
-        // Cap at reasonable maximum (50% load means we still have margin)
-        osNeeded = Math.min(osNeeded, Math.max(1, Math.ceil(osLoad / 50)), osCoresAvailable.length);
-
-        const assignedOsCores = osCoresAvailable.slice(0, osNeeded);
+        // OS takes 0, 1, 2, ... consecutive from start
+        const assignedOsCores = allCores.slice(0, osNeeded);
         assignedOsCores.forEach(c => assignRole(c, 'sys_os'));
 
         const osLoadPerCore = assignedOsCores.length > 0 ? osLoad / assignedOsCores.length : 0;
@@ -161,52 +139,64 @@ export function AutoOptimize() {
             cores: assignedOsCores,
             description: `${assignedOsCores.length} ядер (${osLoad.toFixed(0)}% → ${osLoadPerCore.toFixed(0)}%/core)`,
             role: 'sys_os',
-            rationale: 'Target 30%, от 0 последовательно',
+            rationale: `0-${osNeeded - 1} последовательно, target 30%`,
             instance: 'OS',
         });
 
+        // === Step 3: Per-Instance Allocation ===
+        const instanceBudgets: InstanceBudget[] = [];
 
-        // NOTE: IRQ is calculated per-instance, not shared
+        // Divide remaining isolated cores between instances
+        const isolatedAvailable = allCores.filter(c =>
+            c >= osNeeded && isolatedSet.has(String(c)) && !isAssigned(c)
+        );
 
-        // === PHASE 3: Per-Instance Allocation ===
-        const instanceAllocations: InstanceAllocation[] = [];
+        const coresPerInstance = Math.floor(isolatedAvailable.length / detectedInstances.length);
+        const instancePools: Record<string, number[]> = {};
+
+        detectedInstances.forEach((instName, idx) => {
+            const start = idx * coresPerInstance;
+            const end = idx === detectedInstances.length - 1
+                ? isolatedAvailable.length
+                : start + coresPerInstance;
+            instancePools[instName] = isolatedAvailable.slice(start, end);
+        });
 
         for (const instName of detectedInstances) {
-            const instRoles = instanceRoles[instName] || currentRoles;
+            const instRoles = instanceCores[instName] || {};
+            const pool = [...instancePools[instName]];
 
-            // Get available cores (not assigned yet)
-            const instCandidates = allCoresSorted
-                .filter(c => isolatedSet.has(String(c)) && !isAssigned(c))
-                .sort((a, b) => a - b);
-
-            let instIdx = 0;
-            const getInstCore = () => {
-                while (instIdx < instCandidates.length) {
-                    const c = instCandidates[instIdx++];
+            let poolIdx = 0;
+            const getCore = () => {
+                while (poolIdx < pool.length) {
+                    const c = pool[poolIdx++];
                     if (!isAssigned(c)) return c;
                 }
                 return null;
             };
 
-            const allocation: InstanceAllocation = {
+            const budget: InstanceBudget = {
                 name: instName,
                 trash: null,
+                click: null,
                 udp: null,
                 ar: null,
                 irq: [],
                 gateways: [],
                 robots: [],
+                formula: null,
                 reserve: [],
             };
 
-            // 3.1 Trash + ClickHouse (1 core per instance)
-            const trashCore = getInstCore();
+            // 3.1 Trash + ClickHouse
+            const trashCore = getCore();
             if (trashCore !== null) {
-                allocation.trash = trashCore;
-                assignRole(trashCore, 'trash', instName);
-                assignRole(trashCore, 'click', instName);
+                budget.trash = trashCore;
+                budget.click = trashCore;
+                assignRole(trashCore, 'trash');
+                assignRole(trashCore, 'click');
                 recs.push({
-                    title: `[TRASH+CLICK] ${instName}`,
+                    title: '[TRASH+CLICK]',
                     cores: [trashCore],
                     description: `Ядро ${trashCore}`,
                     role: 'trash',
@@ -215,13 +205,13 @@ export function AutoOptimize() {
                 });
             }
 
-            // 3.2 UDP (1 core per instance)
-            const udpCore = getInstCore();
+            // 3.2 UDP
+            const udpCore = getCore();
             if (udpCore !== null) {
-                allocation.udp = udpCore;
-                assignRole(udpCore, 'udp', instName);
+                budget.udp = udpCore;
+                assignRole(udpCore, 'udp');
                 recs.push({
-                    title: `[UDP] ${instName}`,
+                    title: '[UDP]',
                     cores: [udpCore],
                     description: `Ядро ${udpCore}`,
                     role: 'udp',
@@ -230,15 +220,16 @@ export function AutoOptimize() {
                 });
             }
 
-            // 3.3 AR + RF + Formula (1 core per instance, NOT on trash!)
-            const arCore = getInstCore();
+            // 3.3 AR + RF + Formula
+            const arCore = getCore();
             if (arCore !== null) {
-                allocation.ar = arCore;
-                assignRole(arCore, 'ar', instName);
-                assignRole(arCore, 'rf', instName);
-                assignRole(arCore, 'formula', instName);
+                budget.ar = arCore;
+                budget.formula = arCore;
+                assignRole(arCore, 'ar');
+                assignRole(arCore, 'rf');
+                assignRole(arCore, 'formula');
                 recs.push({
-                    title: `[AR+RF+FORMULA] ${instName}`,
+                    title: '[AR+RF+FORMULA]',
                     cores: [arCore],
                     description: `Ядро ${arCore}`,
                     role: 'ar',
@@ -247,187 +238,146 @@ export function AutoOptimize() {
                 });
             }
 
-            // 3.4 IRQ per instance: 1 per 4 gateways FOR THIS INSTANCE
-            const instGwCount = instRoles['gateway']?.length || 0;
-            const instIrqNeeded = Math.max(1, Math.ceil(instGwCount / 4));
+            // 3.4 IRQ per instance: 1 per 4 gateways
+            const gwCoresCurrent = instRoles['gateway'] || [];
+            const gwCount = gwCoresCurrent.length;
+            const irqNeeded = Math.max(1, Math.ceil(gwCount / 4));
 
-            for (let i = 0; i < instIrqNeeded; i++) {
-                const c = getInstCore();
+            for (let i = 0; i < irqNeeded; i++) {
+                const c = getCore();
                 if (c !== null) {
-                    allocation.irq.push(c);
-                    assignRole(c, 'net_irq', instName);
+                    budget.irq.push(c);
+                    assignRole(c, 'net_irq');
                 }
             }
 
-            if (allocation.irq.length > 0) {
+            if (budget.irq.length > 0) {
                 recs.push({
-                    title: `[IRQ] ${instName}`,
-                    cores: allocation.irq,
-                    description: `${allocation.irq.length} ядер (${instGwCount} gw / 4)`,
+                    title: '[IRQ]',
+                    cores: budget.irq,
+                    description: `${budget.irq.length} ядер (${gwCount} gw / 4)`,
                     role: 'net_irq',
-                    rationale: '1 IRQ / 4 gateways per instance',
+                    rationale: '1 IRQ / 4 gateways',
                     instance: instName,
                 });
             }
 
-            // 3.5 Gateways (target 30%)
-            const gwLoad = getTotalLoad(instRoles['gateway'] || []);
-            const gwNeeded = gwLoad > 0
+            // 3.5 Gateways (load-based, target 30%)
+            const gwLoad = getTotalLoad(gwCoresCurrent);
+            const gwNeeded = gwLoad > 5
                 ? Math.max(1, Math.ceil(gwLoad / 30))
-                : instGwCount;
+                : Math.max(1, gwCount - 1); // Low load, can reduce by 1
 
-            // Check if low load - maybe reduce or skip
+            for (let i = 0; i < gwNeeded; i++) {
+                const c = getCore();
+                if (c !== null) {
+                    budget.gateways.push(c);
+                    assignRole(c, 'gateway');
+                }
+            }
 
-
-            if (gwLoad < 5) {
-                // Very low load - can reduce
+            if (budget.gateways.length > 0) {
+                const gwLoadPerCore = budget.gateways.length > 0 ? gwLoad / budget.gateways.length : 0;
                 recs.push({
-                    title: `[GATEWAYS] ${instName}`,
-                    cores: [],
-                    description: `Низкая нагрузка (${gwLoad.toFixed(0)}%)`,
+                    title: '[GATEWAYS]',
+                    cores: budget.gateways,
+                    description: `${budget.gateways.length} ядер (${gwLoad.toFixed(0)}% → ${gwLoadPerCore.toFixed(0)}%/core)`,
                     role: 'gateway',
-                    rationale: '<5% - можно сократить',
-                    warning: 'Рекомендуется проверить',
+                    rationale: 'Target 30%',
+                    warning: budget.gateways.length < gwNeeded ? `Нужно ${gwNeeded}!` : null,
                     instance: instName,
                 });
-            } else {
-                for (let i = 0; i < gwNeeded; i++) {
-                    const c = getInstCore();
-                    if (c !== null) {
-                        allocation.gateways.push(c);
-                        assignRole(c, 'gateway', instName);
-                    }
-                }
-
-                if (allocation.gateways.length > 0) {
-                    const newLoad = gwLoad / allocation.gateways.length;
-                    recs.push({
-                        title: `[GATEWAYS] ${instName}`,
-                        cores: allocation.gateways,
-                        description: `${allocation.gateways.length} ядер (${gwLoad.toFixed(0)}% → ${newLoad.toFixed(0)}%/core)`,
-                        role: 'gateway',
-                        rationale: 'Target 30%',
-                        warning: allocation.gateways.length < gwNeeded ? `Нужно ${gwNeeded}!` : null,
-                        instance: instName,
-                    });
-                }
             }
 
-            // 3.6 Robots (target 30%, remaining cores)
-            const robotLoad = getTotalLoad(instRoles['robot_default'] || []);
-            const robotNeeded = robotLoad > 0
+            // 3.6 Robots (remaining cores, target 30%)
+            const robotCoresCurrent = instRoles['robot_default'] || [];
+            const robotLoad = getTotalLoad(robotCoresCurrent);
+            const robotNeeded = robotLoad > 5
                 ? Math.max(1, Math.ceil(robotLoad / 30))
-                : 0;
+                : 1;
 
-            if (robotLoad < 5) {
-                // Very low load - keep as reserve
-                let c = getInstCore();
-                while (c !== null) {
-                    allocation.reserve.push(c);
-                    assignRole(c, 'isolated', instName);
-                    c = getInstCore();
+            let robotAllocated = 0;
+            let c = getCore();
+            while (c !== null) {
+                if (robotAllocated < robotNeeded || robotLoad > robotAllocated * 40) {
+                    budget.robots.push(c);
+                    assignRole(c, 'robot_default');
+                    robotAllocated++;
+                } else {
+                    // Extra → reserve
+                    budget.reserve.push(c);
+                    assignRole(c, 'isolated');
                 }
-
-                if (allocation.reserve.length > 0) {
-                    recs.push({
-                        title: `[RESERVE] ${instName}`,
-                        cores: allocation.reserve,
-                        description: `${allocation.reserve.length} ядер (нагрузка <5%)`,
-                        role: 'isolated',
-                        rationale: 'Резерв для будущего',
-                        instance: instName,
-                    });
-                }
-            } else {
-                // Allocate robots
-                let robotAllocated = 0;
-                let c = getInstCore();
-                while (c !== null) {
-                    if (robotAllocated < robotNeeded) {
-                        allocation.robots.push(c);
-                        assignRole(c, 'robot_default', instName);
-                        robotAllocated++;
-                    } else {
-                        // Extra cores → reserve if low individual load
-                        allocation.reserve.push(c);
-                        assignRole(c, 'robot_default', instName); // Still usable
-                    }
-                    c = getInstCore();
-                }
-
-                if (allocation.robots.length > 0) {
-                    const robotLoadPerCore = robotLoad / allocation.robots.length;
-                    recs.push({
-                        title: `[ROBOTS] ${instName}`,
-                        cores: allocation.robots,
-                        description: `${allocation.robots.length} ядер (${robotLoad.toFixed(0)}% → ${robotLoadPerCore.toFixed(0)}%/core)`,
-                        role: 'robot_default',
-                        rationale: 'Target 30%',
-                        instance: instName,
-                    });
-                }
-
-                if (allocation.reserve.length > 0) {
-                    recs.push({
-                        title: `[EXTRA ROBOTS] ${instName}`,
-                        cores: allocation.reserve,
-                        description: `${allocation.reserve.length} ядер`,
-                        role: 'robot_default',
-                        rationale: 'Доп. мощность',
-                        instance: instName,
-                    });
-                }
+                c = getCore();
             }
 
-            instanceAllocations.push(allocation);
+            if (budget.robots.length > 0) {
+                const robotLoadPerCore = budget.robots.length > 0 ? robotLoad / budget.robots.length : 0;
+                recs.push({
+                    title: '[ROBOTS]',
+                    cores: budget.robots,
+                    description: `${budget.robots.length} ядер (${robotLoad.toFixed(0)}% → ${robotLoadPerCore.toFixed(0)}%/core)`,
+                    role: 'robot_default',
+                    rationale: 'Target 30-40%',
+                    instance: instName,
+                });
+            }
+
+            if (budget.reserve.length > 0) {
+                recs.push({
+                    title: '[RESERVE]',
+                    cores: budget.reserve,
+                    description: `${budget.reserve.length} ядер`,
+                    role: 'isolated',
+                    rationale: 'Резерв для будущего',
+                    instance: instName,
+                });
+            }
+
+            instanceBudgets.push(budget);
         }
 
-        // === PHASE 4: Fill Remaining ===
-        // Non-isolated remaining → OS
-        const remainingNonIsolated = allCoresSorted.filter(c =>
-            !isolatedSet.has(String(c)) && !isAssigned(c)
-        );
-        if (remainingNonIsolated.length > 0) {
-            remainingNonIsolated.forEach(c => assignRole(c, 'sys_os'));
-            recs.push({
-                title: '[OS] Additional',
-                cores: remainingNonIsolated,
-                description: `${remainingNonIsolated.length} ядер`,
-                role: 'sys_os',
-                rationale: 'Не изолированы → OS',
-                instance: 'OS',
-            });
-        }
+        // === Step 4: Fill any remaining cores ===
+        const remainingCores = allCores.filter(c => !isAssigned(c));
+        if (remainingCores.length > 0) {
+            // Non-isolated → OS
+            const remNonIso = remainingCores.filter(c => !isolatedSet.has(String(c)));
+            remNonIso.forEach(c => assignRole(c, 'sys_os'));
+            if (remNonIso.length > 0) {
+                recs.push({
+                    title: '[OS Additional]',
+                    cores: remNonIso,
+                    description: `${remNonIso.length} ядер`,
+                    role: 'sys_os',
+                    rationale: 'Не изолированы',
+                    instance: 'OS',
+                });
+            }
 
-        // Isolated remaining → reserve
-        const remainingIsolated = allCoresSorted.filter(c =>
-            isolatedSet.has(String(c)) && !isAssigned(c)
-        );
-        if (remainingIsolated.length > 0) {
-            remainingIsolated.forEach(c => assignRole(c, 'isolated'));
-            recs.push({
-                title: '[RESERVE] Unassigned',
-                cores: remainingIsolated,
-                description: `${remainingIsolated.length} ядер`,
-                role: 'isolated',
-                rationale: 'Резерв',
-            });
+            // Isolated → reserve
+            const remIso = remainingCores.filter(c => isolatedSet.has(String(c)));
+            remIso.forEach(c => assignRole(c, 'isolated'));
+            if (remIso.length > 0) {
+                recs.push({
+                    title: '[RESERVE Global]',
+                    cores: remIso,
+                    description: `${remIso.length} ядер`,
+                    role: 'isolated',
+                    rationale: 'Резерв',
+                    instance: 'Reserve',
+                });
+            }
         }
-
-        // === Summary ===
-        const assignedCount = assignedCores.size;
 
         setRecommendations(recs);
 
-        const summaryParts = detectedInstances.map(inst => {
-            const alloc = instanceAllocations.find(a => a.name === inst);
-            if (!alloc) return inst;
-            const total = (alloc.trash ? 1 : 0) + (alloc.udp ? 1 : 0) + (alloc.ar ? 1 : 0) +
-                alloc.irq.length + alloc.gateways.length + alloc.robots.length;
-            return `${inst}:${total}`;
+        const summaryParts = instanceBudgets.map(b => {
+            const total = (b.trash ? 1 : 0) + (b.udp ? 1 : 0) + (b.ar ? 1 : 0) +
+                b.irq.length + b.gateways.length + b.robots.length;
+            return `${b.name}:${total}`;
         });
 
-        setResult(`${detectedInstances.length} instance(s) | ${summaryParts.join(', ')} | ${assignedCount}/${totalCores} cores`);
+        setResult(`${detectedInstances.length} instance(s) | ${summaryParts.join(', ')} | OS:${assignedOsCores.length} | ${assignedCores.size}/${totalCores}`);
     };
 
     const applyRecommendations = () => {
@@ -439,9 +389,8 @@ export function AutoOptimize() {
                 if (!proposed[cpuStr].includes(rec.role)) {
                     proposed[cpuStr].push(rec.role);
                 }
-                // Special combinations
-                if (rec.role === 'trash') {
-                    if (!proposed[cpuStr].includes('click')) proposed[cpuStr].push('click');
+                if (rec.role === 'trash' && !proposed[cpuStr].includes('click')) {
+                    proposed[cpuStr].push('click');
                 }
                 if (rec.role === 'ar') {
                     if (!proposed[cpuStr].includes('rf')) proposed[cpuStr].push('rf');
@@ -449,23 +398,33 @@ export function AutoOptimize() {
                 }
             });
         });
+
+        // Update state and force refresh
         setInstances({ Physical: proposed });
         setResult('Applied! Check topology map.');
     };
 
-    // Group recommendations by instance (no "Shared" - OS is its own group)
-    const groupedRecs = recommendations.reduce((acc, rec) => {
-        const key = rec.instance || 'OS';
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(rec);
-        return acc;
-    }, {} as Record<string, Recommendation[]>);
+    // Group recommendations by instance
+    const groupedRecs: Record<string, Recommendation[]> = {};
+    recommendations.forEach(rec => {
+        if (!groupedRecs[rec.instance]) groupedRecs[rec.instance] = [];
+        groupedRecs[rec.instance].push(rec);
+    });
+
+    // Order: OS first, then instances alphabetically, Reserve last
+    const instanceOrder = Object.keys(groupedRecs).sort((a, b) => {
+        if (a === 'OS') return -1;
+        if (b === 'OS') return 1;
+        if (a === 'Reserve') return 1;
+        if (b === 'Reserve') return -1;
+        return a.localeCompare(b);
+    });
 
     return (
         <div className="optimize-container">
             <div className="optimize-header">
-                <h2>[AUTO-OPTIMIZATION ENGINE v4]</h2>
-                <p>Multi-instance support with per-instance IRQ and 30% load target</p>
+                <h2>[AUTO-OPTIMIZATION ENGINE v5]</h2>
+                <p>Per-instance allocation with load-based calculation (target 30%)</p>
             </div>
 
             <div className="optimize-actions">
@@ -485,12 +444,12 @@ export function AutoOptimize() {
                 </div>
             )}
 
-            {Object.keys(groupedRecs).length > 0 && (
+            {instanceOrder.length > 0 && (
                 <div className="optimize-recommendations">
-                    {Object.entries(groupedRecs).map(([instName, instRecs]) => (
+                    {instanceOrder.map(instName => (
                         <div key={instName} className="instance-section">
                             <h3 className="instance-header">=== {instName} ===</h3>
-                            {instRecs.map((rec, idx) => (
+                            {groupedRecs[instName].map((rec, idx) => (
                                 <div key={idx} className={`recommend-card ${rec.warning ? 'warning' : ''}`}>
                                     <h4>{rec.title}</h4>
                                     <p>{rec.description}</p>
