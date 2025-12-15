@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { InputPanel } from './components/InputPanel';
-import { TopologyMap } from './components/TopologyMap';
-import { ConfigOutput } from './components/ConfigOutput';
+import { MapperLayout } from './components/MapperLayout';
 import { CompareView } from './components/CompareView';
 import { AutoOptimize } from './components/AutoOptimize';
 import { useAppStore } from './store/appStore';
@@ -85,17 +83,7 @@ function App() {
         {/* Content */}
         <div className="content">
           {activeTab === 'mapper' && (
-            <div className="mapper-dashboard">
-              <div className="card input-card">
-                <InputPanel />
-              </div>
-              <div className="card mapper-card">
-                <TopologyMap />
-              </div>
-              <div className="card config-card">
-                <ConfigOutput />
-              </div>
-            </div>
+            <MapperLayout />
           )}
           {activeTab === 'compare' && <CompareView />}
           {activeTab === 'optimize' && <AutoOptimize />}

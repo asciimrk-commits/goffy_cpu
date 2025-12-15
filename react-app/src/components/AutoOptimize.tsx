@@ -272,34 +272,98 @@ function SummaryPanel({ result }: { result: OptimizationResult }) {
     );
 }
 
-function TopologyPreview({ result }: { result: OptimizationResult }) {
+function TopologyPreview({ result, plan }: { result: OptimizationResult; plan?: RedistributionPlan }) {
     const { geometry, isolatedCores, coreLoads } = useAppStore();
-    const isolatedSet = new Set(isolatedCores);
+    const isolatedSet = new Set(plan ? plan.proposedIsolated : isolatedCores);
     const instanceNames = Object.keys(result.instances);
 
-    // Build role map from result
+    // Build role map from PLAN (proposed) if available, else from result (current)
     const roleMap: Record<number, { roles: string[]; instance?: string }> = {};
 
-    // Map instance cores
-    Object.entries(result.instances).forEach(([instName, analysis]) => {
-        Object.entries(analysis.cores).forEach(([role, cores]) => {
-            cores.forEach(c => {
+    if (plan) {
+        // Use proposed allocations from plan
+        // OS cores
+        plan.proposedOs.forEach(c => {
+            if (!roleMap[c]) roleMap[c] = { roles: [] };
+            roleMap[c].roles.push('sys_os');
+        });
+
+        // Shared IRQ
+        plan.sharedIrq.forEach(c => {
+            if (!roleMap[c]) roleMap[c] = { roles: [] };
+            roleMap[c].roles.push('net_irq');
+        });
+
+        // Per-instance allocations
+        Object.entries(plan.instanceAllocations).forEach(([instName, alloc]) => {
+            alloc.trash.forEach(c => {
                 if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
-                if (!roleMap[c].roles.includes(role)) {
-                    roleMap[c].roles.push(role);
-                }
+                roleMap[c].roles.push('trash');
+                roleMap[c].instance = instName;
+            });
+            alloc.udp.forEach(c => {
+                if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                roleMap[c].roles.push('udp');
+                roleMap[c].instance = instName;
+            });
+            alloc.ar.forEach(c => {
+                if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                roleMap[c].roles.push('ar');
+                roleMap[c].instance = instName;
+            });
+            alloc.rf.forEach(c => {
+                if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                if (!roleMap[c].roles.includes('rf')) roleMap[c].roles.push('rf');
+                roleMap[c].instance = instName;
+            });
+            alloc.gateways.forEach(c => {
+                if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                roleMap[c].roles.push('gateway');
+                roleMap[c].instance = instName;
+            });
+            alloc.robotPoolNode0.forEach(c => {
+                if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                roleMap[c].roles.push('pool1');
+                roleMap[c].instance = instName;
+            });
+            alloc.robotPoolNode1.forEach(c => {
+                if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                roleMap[c].roles.push('pool2');
+                roleMap[c].instance = instName;
+            });
+            alloc.clickhouse.forEach(c => {
+                if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                if (!roleMap[c].roles.includes('click')) roleMap[c].roles.push('click');
+                roleMap[c].instance = instName;
+            });
+            alloc.formula.forEach(c => {
+                if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                if (!roleMap[c].roles.includes('formula')) roleMap[c].roles.push('formula');
                 roleMap[c].instance = instName;
             });
         });
-    });
+    } else {
+        // Fallback: use current config from result
+        Object.entries(result.instances).forEach(([instName, analysis]) => {
+            Object.entries(analysis.cores).forEach(([role, cores]) => {
+                cores.forEach(c => {
+                    if (!roleMap[c]) roleMap[c] = { roles: [], instance: instName };
+                    if (!roleMap[c].roles.includes(role)) {
+                        roleMap[c].roles.push(role);
+                    }
+                    roleMap[c].instance = instName;
+                });
+            });
+        });
 
-    // Add OS cores
-    result.os.cores.forEach(c => {
-        if (!roleMap[c]) roleMap[c] = { roles: [] };
-        if (!roleMap[c].roles.includes('sys_os')) {
-            roleMap[c].roles.push('sys_os');
-        }
-    });
+        // Add OS cores
+        result.os.cores.forEach(c => {
+            if (!roleMap[c]) roleMap[c] = { roles: [] };
+            if (!roleMap[c].roles.includes('sys_os')) {
+                roleMap[c].roles.push('sys_os');
+            }
+        });
+    }
 
     return (
         <div style={{ marginBottom: '16px' }}>
@@ -539,7 +603,7 @@ export function AutoOptimize() {
                             <>
                                 <InstanceSummary result={result} />
                                 <L3CacheView result={result} />
-                                <TopologyPreview result={result} />
+                                <TopologyPreview result={result} plan={plan || undefined} />
                             </>
                         )}
 
