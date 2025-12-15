@@ -30,6 +30,8 @@ export function AutoOptimize() {
         geometry,
         isolatedCores,
         instances,
+        netNumaNodes,
+        coreNumaMap,
         setInstances,
     } = useAppStore();
 
@@ -45,6 +47,9 @@ export function AutoOptimize() {
         const coreLoads = useAppStore.getState().coreLoads;
         const isolatedSet = new Set(isolatedCores.map(String));
 
+        // Network NUMA (from IF:net0|NUMA:X)
+        const netNuma = netNumaNodes.length > 0 ? netNumaNodes[0] : 0;
+
         // === Helper Functions ===
         const getTotalLoad = (cores: (string | number)[]): number => {
             if (!cores?.length) return 0;
@@ -54,19 +59,30 @@ export function AutoOptimize() {
             }, 0);
         };
 
-        // All cores sorted
+        const getCoreNuma = (core: number): number => {
+            return coreNumaMap[String(core)] ?? 0;
+        };
+
+        // Build cores by NUMA
+        const coresByNuma: Record<number, number[]> = {};
         const allCores: number[] = [];
+
         Object.entries(geometry).forEach(([, numaData]) => {
-            Object.entries(numaData).forEach(([, l3Data]) => {
+            Object.entries(numaData).forEach(([numaId, l3Data]) => {
+                const numa = parseInt(numaId);
+                if (!coresByNuma[numa]) coresByNuma[numa] = [];
                 Object.entries(l3Data).forEach(([, cores]) => {
                     allCores.push(...cores);
+                    coresByNuma[numa].push(...cores);
                 });
             });
         });
+
         allCores.sort((a, b) => a - b);
+        Object.values(coresByNuma).forEach(arr => arr.sort((a, b) => a - b));
         const totalCores = allCores.length;
 
-        // === Step 1: Detect Instances from parsed data ===
+        // === Step 1: Detect Instances ===
         const detectedInstances: string[] = [];
         const instanceCores: Record<string, Record<string, string[]>> = {};
 
@@ -75,13 +91,10 @@ export function AutoOptimize() {
             if (cpuMap && Object.keys(cpuMap).length > 0) {
                 detectedInstances.push(instName);
                 instanceCores[instName] = {};
-
                 Object.entries(cpuMap).forEach(([cpu, roles]) => {
                     if (Array.isArray(roles)) {
                         roles.forEach((role: string) => {
-                            if (!instanceCores[instName][role]) {
-                                instanceCores[instName][role] = [];
-                            }
+                            if (!instanceCores[instName][role]) instanceCores[instName][role] = [];
                             instanceCores[instName][role].push(cpu);
                         });
                     }
@@ -89,15 +102,12 @@ export function AutoOptimize() {
             }
         });
 
-        // Fallback if no named instances
         if (detectedInstances.length === 0) {
             detectedInstances.push('Physical');
             instanceCores['Physical'] = {};
             Object.entries(instances.Physical || {}).forEach(([cpu, roles]) => {
                 roles.forEach((role: string) => {
-                    if (!instanceCores['Physical'][role]) {
-                        instanceCores['Physical'][role] = [];
-                    }
+                    if (!instanceCores['Physical'][role]) instanceCores['Physical'][role] = [];
                     instanceCores['Physical'][role].push(cpu);
                 });
             });
@@ -119,17 +129,15 @@ export function AutoOptimize() {
             return assignedCores.has(cpuNum);
         };
 
-        // === Step 2: Calculate OS (non-isolated cores) ===
-        // Cores without isolation = OS cores
+        // === Step 2: OS Cores (0 to N consecutive) ===
         const currentOsCores = allCores.filter(c => !isolatedSet.has(String(c)));
         const osLoad = getTotalLoad(currentOsCores);
 
-        // Target 30% per core
         let osNeeded = osLoad > 0
             ? Math.max(1, Math.ceil(osLoad / 30))
             : Math.max(1, Math.min(4, currentOsCores.length));
 
-        // OS takes 0, 1, 2, ... consecutive from start
+        // OS = 0, 1, 2, ... osNeeded-1
         const assignedOsCores = allCores.slice(0, osNeeded);
         assignedOsCores.forEach(c => assignRole(c, 'sys_os'));
 
@@ -143,33 +151,57 @@ export function AutoOptimize() {
             instance: 'OS',
         });
 
+        // All cores after OS are now available for services (isolated)
+        const isolatedForServices = allCores.filter(c => c >= osNeeded && !isAssigned(c));
+
         // === Step 3: Per-Instance Allocation ===
         const instanceBudgets: InstanceBudget[] = [];
 
-        // Divide remaining isolated cores between instances
-        const isolatedAvailable = allCores.filter(c =>
-            c >= osNeeded && isolatedSet.has(String(c)) && !isAssigned(c)
-        );
+        // Cores on network NUMA (for IRQ + Gateways)
+        const netNumaCores = isolatedForServices.filter(c => getCoreNuma(c) === netNuma);
+        const otherNumaCores = isolatedForServices.filter(c => getCoreNuma(c) !== netNuma);
 
-        const coresPerInstance = Math.floor(isolatedAvailable.length / detectedInstances.length);
+        // Divide cores between instances
+        const coresPerInstance = Math.floor(isolatedForServices.length / detectedInstances.length);
         const instancePools: Record<string, number[]> = {};
+        const instanceNetPools: Record<string, number[]> = {};
 
         detectedInstances.forEach((instName, idx) => {
+            // Each instance gets portion of net NUMA cores for IRQ/GW
+            const netStart = Math.floor(idx * netNumaCores.length / detectedInstances.length);
+            const netEnd = Math.floor((idx + 1) * netNumaCores.length / detectedInstances.length);
+            instanceNetPools[instName] = netNumaCores.slice(netStart, netEnd);
+
+            // Plus portion of other cores
             const start = idx * coresPerInstance;
             const end = idx === detectedInstances.length - 1
-                ? isolatedAvailable.length
+                ? isolatedForServices.length
                 : start + coresPerInstance;
-            instancePools[instName] = isolatedAvailable.slice(start, end);
+            instancePools[instName] = [
+                ...instanceNetPools[instName],
+                ...otherNumaCores.slice(start, end)
+            ];
         });
 
         for (const instName of detectedInstances) {
             const instRoles = instanceCores[instName] || {};
-            const pool = [...instancePools[instName]];
+            const netPool = [...instanceNetPools[instName]];
+            const allPool = [...instancePools[instName]];
 
-            let poolIdx = 0;
-            const getCore = () => {
-                while (poolIdx < pool.length) {
-                    const c = pool[poolIdx++];
+            let netIdx = 0;
+            let allIdx = 0;
+
+            const getNetCore = () => {
+                while (netIdx < netPool.length) {
+                    const c = netPool[netIdx++];
+                    if (!isAssigned(c)) return c;
+                }
+                return null;
+            };
+
+            const getAnyCore = () => {
+                while (allIdx < allPool.length) {
+                    const c = allPool[allIdx++];
                     if (!isAssigned(c)) return c;
                 }
                 return null;
@@ -177,19 +209,12 @@ export function AutoOptimize() {
 
             const budget: InstanceBudget = {
                 name: instName,
-                trash: null,
-                click: null,
-                udp: null,
-                ar: null,
-                irq: [],
-                gateways: [],
-                robots: [],
-                formula: null,
-                reserve: [],
+                trash: null, click: null, udp: null, ar: null,
+                irq: [], gateways: [], robots: [], formula: null, reserve: [],
             };
 
-            // 3.1 Trash + ClickHouse
-            const trashCore = getCore();
+            // 3.1 Trash + ClickHouse (NOT on net NUMA, dirty L3)
+            const trashCore = getAnyCore();
             if (trashCore !== null) {
                 budget.trash = trashCore;
                 budget.click = trashCore;
@@ -200,13 +225,13 @@ export function AutoOptimize() {
                     cores: [trashCore],
                     description: `Ядро ${trashCore}`,
                     role: 'trash',
-                    rationale: '"Грязный" L3',
+                    rationale: '"Грязный" L3, НЕ на сетевой NUMA',
                     instance: instName,
                 });
             }
 
             // 3.2 UDP
-            const udpCore = getCore();
+            const udpCore = getAnyCore();
             if (udpCore !== null) {
                 budget.udp = udpCore;
                 assignRole(udpCore, 'udp');
@@ -220,8 +245,8 @@ export function AutoOptimize() {
                 });
             }
 
-            // 3.3 AR + RF + Formula
-            const arCore = getCore();
+            // 3.3 AR + RF + Formula (NOT on trash, NOT on net NUMA)
+            const arCore = getAnyCore();
             if (arCore !== null) {
                 budget.ar = arCore;
                 budget.formula = arCore;
@@ -238,13 +263,13 @@ export function AutoOptimize() {
                 });
             }
 
-            // 3.4 IRQ per instance: 1 per 4 gateways
+            // 3.4 IRQ on NET NUMA (1 per 4 gateways)
             const gwCoresCurrent = instRoles['gateway'] || [];
             const gwCount = gwCoresCurrent.length;
             const irqNeeded = Math.max(1, Math.ceil(gwCount / 4));
 
             for (let i = 0; i < irqNeeded; i++) {
-                const c = getCore();
+                const c = getNetCore();
                 if (c !== null) {
                     budget.irq.push(c);
                     assignRole(c, 'net_irq');
@@ -255,21 +280,21 @@ export function AutoOptimize() {
                 recs.push({
                     title: '[IRQ]',
                     cores: budget.irq,
-                    description: `${budget.irq.length} ядер (${gwCount} gw / 4)`,
+                    description: `${budget.irq.length} ядер (${gwCount} gw / 4) NUMA ${netNuma}`,
                     role: 'net_irq',
-                    rationale: '1 IRQ / 4 gateways',
+                    rationale: 'На сетевой NUMA!',
                     instance: instName,
                 });
             }
 
-            // 3.5 Gateways (load-based, target 30%)
+            // 3.5 Gateways on NET NUMA (calc × 2 for first optimization)
             const gwLoad = getTotalLoad(gwCoresCurrent);
-            const gwNeeded = gwLoad > 5
-                ? Math.max(1, Math.ceil(gwLoad / 30))
-                : Math.max(1, gwCount - 1); // Low load, can reduce by 1
+            const gwCalc = gwLoad > 5 ? Math.max(1, Math.ceil(gwLoad / 30)) : gwCount;
+            const gwNeeded = Math.max(gwCalc * 2, gwCount - 1); // × 2 buffer!
 
             for (let i = 0; i < gwNeeded; i++) {
-                const c = getCore();
+                let c = getNetCore();
+                if (c === null) c = getAnyCore(); // fallback if net NUMA exhausted
                 if (c !== null) {
                     budget.gateways.push(c);
                     assignRole(c, 'gateway');
@@ -278,37 +303,27 @@ export function AutoOptimize() {
 
             if (budget.gateways.length > 0) {
                 const gwLoadPerCore = budget.gateways.length > 0 ? gwLoad / budget.gateways.length : 0;
+                const onNetNuma = budget.gateways.filter(c => getCoreNuma(c) === netNuma).length;
                 recs.push({
                     title: '[GATEWAYS]',
                     cores: budget.gateways,
                     description: `${budget.gateways.length} ядер (${gwLoad.toFixed(0)}% → ${gwLoadPerCore.toFixed(0)}%/core)`,
                     role: 'gateway',
-                    rationale: 'Target 30%',
+                    rationale: `calc×2, ${onNetNuma}/${budget.gateways.length} на NUMA ${netNuma}`,
                     warning: budget.gateways.length < gwNeeded ? `Нужно ${gwNeeded}!` : null,
                     instance: instName,
                 });
             }
 
-            // 3.6 Robots (remaining cores, target 30%)
+            // 3.6 Robots (remaining cores)
             const robotCoresCurrent = instRoles['robot_default'] || [];
             const robotLoad = getTotalLoad(robotCoresCurrent);
-            const robotNeeded = robotLoad > 5
-                ? Math.max(1, Math.ceil(robotLoad / 30))
-                : 1;
 
-            let robotAllocated = 0;
-            let c = getCore();
+            let c = getAnyCore();
             while (c !== null) {
-                if (robotAllocated < robotNeeded || robotLoad > robotAllocated * 40) {
-                    budget.robots.push(c);
-                    assignRole(c, 'robot_default');
-                    robotAllocated++;
-                } else {
-                    // Extra → reserve
-                    budget.reserve.push(c);
-                    assignRole(c, 'isolated');
-                }
-                c = getCore();
+                budget.robots.push(c);
+                assignRole(c, 'robot_default');
+                c = getAnyCore();
             }
 
             if (budget.robots.length > 0) {
@@ -323,50 +338,21 @@ export function AutoOptimize() {
                 });
             }
 
-            if (budget.reserve.length > 0) {
-                recs.push({
-                    title: '[RESERVE]',
-                    cores: budget.reserve,
-                    description: `${budget.reserve.length} ядер`,
-                    role: 'isolated',
-                    rationale: 'Резерв для будущего',
-                    instance: instName,
-                });
-            }
-
             instanceBudgets.push(budget);
         }
 
-        // === Step 4: Fill any remaining cores ===
-        const remainingCores = allCores.filter(c => !isAssigned(c));
-        if (remainingCores.length > 0) {
-            // Non-isolated → OS
-            const remNonIso = remainingCores.filter(c => !isolatedSet.has(String(c)));
-            remNonIso.forEach(c => assignRole(c, 'sys_os'));
-            if (remNonIso.length > 0) {
-                recs.push({
-                    title: '[OS Additional]',
-                    cores: remNonIso,
-                    description: `${remNonIso.length} ядер`,
-                    role: 'sys_os',
-                    rationale: 'Не изолированы',
-                    instance: 'OS',
-                });
-            }
-
-            // Isolated → reserve
-            const remIso = remainingCores.filter(c => isolatedSet.has(String(c)));
-            remIso.forEach(c => assignRole(c, 'isolated'));
-            if (remIso.length > 0) {
-                recs.push({
-                    title: '[RESERVE Global]',
-                    cores: remIso,
-                    description: `${remIso.length} ядер`,
-                    role: 'isolated',
-                    rationale: 'Резерв',
-                    instance: 'Reserve',
-                });
-            }
+        // === Step 4: Fill remaining ===
+        const remaining = allCores.filter(c => !isAssigned(c));
+        if (remaining.length > 0) {
+            remaining.forEach(c => assignRole(c, 'robot_default'));
+            recs.push({
+                title: '[EXTRA → ROBOTS]',
+                cores: remaining,
+                description: `${remaining.length} ядер`,
+                role: 'robot_default',
+                rationale: 'Все ядра заняты',
+                instance: 'Extra',
+            });
         }
 
         setRecommendations(recs);
@@ -377,7 +363,7 @@ export function AutoOptimize() {
             return `${b.name}:${total}`;
         });
 
-        setResult(`${detectedInstances.length} instance(s) | ${summaryParts.join(', ')} | OS:${assignedOsCores.length} | ${assignedCores.size}/${totalCores}`);
+        setResult(`${detectedInstances.length} instance(s) | ${summaryParts.join(', ')} | OS:${assignedOsCores.length} | netNUMA:${netNuma} | ${assignedCores.size}/${totalCores}`);
     };
 
     const applyRecommendations = () => {
@@ -398,33 +384,30 @@ export function AutoOptimize() {
                 }
             });
         });
-
-        // Update state and force refresh
         setInstances({ Physical: proposed });
         setResult('Applied! Check topology map.');
     };
 
-    // Group recommendations by instance
+    // Group by instance
     const groupedRecs: Record<string, Recommendation[]> = {};
     recommendations.forEach(rec => {
         if (!groupedRecs[rec.instance]) groupedRecs[rec.instance] = [];
         groupedRecs[rec.instance].push(rec);
     });
 
-    // Order: OS first, then instances alphabetically, Reserve last
     const instanceOrder = Object.keys(groupedRecs).sort((a, b) => {
         if (a === 'OS') return -1;
         if (b === 'OS') return 1;
-        if (a === 'Reserve') return 1;
-        if (b === 'Reserve') return -1;
+        if (a === 'Extra') return 1;
+        if (b === 'Extra') return -1;
         return a.localeCompare(b);
     });
 
     return (
         <div className="optimize-container">
             <div className="optimize-header">
-                <h2>[AUTO-OPTIMIZATION ENGINE v5]</h2>
-                <p>Per-instance allocation with load-based calculation (target 30%)</p>
+                <h2>[AUTO-OPTIMIZATION ENGINE v6]</h2>
+                <p>Network NUMA placement + Gateway ×2 buffer</p>
             </div>
 
             <div className="optimize-actions">
