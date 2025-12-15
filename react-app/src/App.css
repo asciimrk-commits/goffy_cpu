@@ -1,46 +1,181 @@
-/* Layout Grid */
-.mapper-dashboard {
-  display: grid;
-  grid-template-columns: 320px 1fr 320px;
-  /* Input | Map | Config */
-  grid-template-rows: 1fr;
-  gap: 24px;
-  height: 100%;
+/* CSS Variables */
+:root {
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-accent: #8b5cf6;
+  --color-danger: #ef4444;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* Light Theme - Softer */
+:root:not([data-theme="dark"]) {
+  --bg-app: #eef2f6;
+  /* Cool Grey/Blue tint, darker than slate-100 */
+  --bg-panel: #ffffff;
+  --bg-input: #f8fafc;
+  --border-color: #cbd5e1;
+  /* Slate 300 */
+
+  --text-main: #334155;
+  /* Slate 700 - Softer black */
+  --text-secondary: #64748b;
+  /* Slate 500 */
+  --text-muted: #94a3b8;
+  /* Slate 400 */
+
+  --card-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+  --header-bg: #ffffff;
+}
+
+/* Dark Theme */
+[data-theme="dark"] {
+  --bg-app: #0f172a;
+  /* Slate 900 */
+  --bg-panel: #1e293b;
+  /* Slate 800 */
+  --bg-input: #334155;
+  /* Slate 700 */
+  --border-color: #334155;
+
+  --text-main: #f8fafc;
+  /* Slate 50 */
+  --text-secondary: #94a3b8;
+  /* Slate 400 */
+  --text-muted: #64748b;
+  /* Slate 500 */
+
+  --card-shadow: none;
+  --header-bg: #1e293b;
+}
+
+/* Global Reset */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+/* Common Components */
+button {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  padding: 0.6em 1.2em;
+  font-size: 0.9em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: var(--bg-panel);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+button:hover {
+  background-color: var(--bg-input);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+button.primary,
+.btn-primary {
+  background-color: var(--color-primary);
+  color: white;
+  border: none;
+}
+
+button.primary:hover,
+.btn-primary:hover {
+  background-color: var(--color-primary-hover);
+  color: white;
+}
+
+/* Layout Container */
+.app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
   overflow: hidden;
 }
 
-.mapper-card {
-  overflow: hidden;
+.main-content {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.content {
+  flex: 1;
+  overflow: hidden;
+  /* Prevent scrollbar on body */
+  position: relative;
+  padding: 20px;
+}
+
+/* Mapper Dashboard Grid */
+.mapper-dashboard {
+  display: grid;
+  grid-template-columns: 320px 1fr 340px;
+  /* FIXED WIDTHS for side panels */
+  grid-template-rows: 100%;
+  gap: 20px;
+  height: 100%;
+  width: 100%;
+}
+
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+.mapper-card {
   min-width: 0;
-  /* Prevent grid blowout */
+  overflow: auto;
+  /* Allow map to scroll if needed */
 }
 
 .input-card {
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .config-card {
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 /* Header */
 .header {
-  height: 64px;
+  height: 60px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 32px;
+  padding: 0 24px;
   background: var(--header-bg);
   border-bottom: 1px solid var(--border-color);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  /* Subtle separation */
-  z-index: 10;
+  z-index: 20;
 }
 
 .header-tabs {
@@ -48,202 +183,156 @@
   gap: 8px;
   background: var(--bg-input);
   padding: 4px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
 }
 
 .tab {
-  padding: 8px 20px;
-  background: transparent;
+  padding: 6px 16px;
   border: none;
-  color: var(--text-secondary);
+  background: transparent;
   font-size: 13px;
   font-weight: 600;
-  cursor: pointer;
-  border-radius: var(--radius-md);
-  transition: all 0.2s;
-}
-
-.tab:hover {
-  text-decoration: none;
-  color: var(--text-main);
+  color: var(--text-secondary);
+  border-radius: 6px;
 }
 
 .tab.active {
   background: var(--bg-panel);
-  color: var(--color-primary);
-  box-shadow: var(--shadow-sm);
-}
-
-.header-info {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  line-height: 1.2;
-}
-
-.server-name {
-  font-weight: 700;
-  font-size: 14px;
   color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
-.server-date {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.theme-toggle {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  font-size: 16px;
-}
-
-.theme-toggle:hover {
-  background: var(--bg-input);
-  border-color: var(--text-muted);
-}
-
-/* Sidebar Redesign */
+/* Sidebar */
 .sidebar {
-  width: 80px;
-  /* Slim sidebar */
+  width: 72px;
   background: var(--bg-panel);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 0;
-  z-index: 20;
-}
-
-.logo-icon-bg {
-  width: 48px;
-  height: 48px;
-  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 800;
-  font-size: 20px;
-  margin-bottom: 40px;
-}
-
-.sidebar-content {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: 100%;
-  align-items: center;
+  padding: 20px 0;
+  z-index: 30;
 }
 
 .nav-item {
   width: 48px;
   height: 48px;
-  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: 12px;
   color: var(--text-secondary);
-  transition: all 0.2s;
   cursor: pointer;
+  margin-bottom: 8px;
+  transition: all 0.2s;
 }
 
-.nav-item:hover,
-.nav-item.active {
+.nav-item:hover {
   background: var(--bg-input);
   color: var(--color-primary);
 }
 
-.nav-icon {
-  font-size: 24px;
+/* Input Panel & TextAreas */
+textarea,
+input[type="text"] {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  font-family: monospace;
 }
 
-/* Config Output Styles update */
-.config-output {
-  background: transparent;
-  border: none;
+textarea:focus,
+input:focus {
+  outline: 2px solid var(--color-primary);
+  border-color: transparent;
+}
+
+/* Auto Optimize & Compare Containers */
+/* Ensure they fill the space but scroll internally if needed */
+.optimize-container,
+.compare-view {
   height: 100%;
-  display: flex;
-  flex-direction: column;
+  overflow-y: auto;
+  padding-right: 8px;
+  /* Room for scrollbar */
 }
 
-.config-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-.config-content {
-  padding: 16px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12px;
-  color: var(--text-secondary);
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-/* Topology Map Styles Update */
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Topology Map Core Styles */
 .topology-grid {
   padding: 20px;
-  gap: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .socket-card {
-  background: var(--bg-panel);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: none;
-  /* Inside card */
+  background: var(--bg-input);
+  /* Slight contrast against card bg */
+  border-radius: 12px;
+  padding: 16px;
 }
 
-/* Core Visuals */
 .core {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  /* Softer */
-  font-weight: 500;
-  font-family: 'Inter', sans-serif;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  font-size: 11px;
   border: 2px solid transparent;
-  box-shadow: var(--shadow-sm);
-  transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.core:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-  z-index: 5;
+/* Fix Compare Layout */
+.compare-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
-/* Buttons */
-.btn-primary {
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  height: 100%;
+  min-height: 0;
+  /* Important for nested scrolls */
 }
 
-.btn-primary:hover {
-  background: var(--color-primary-hover);
-  transform: translateY(-1px);
+.compare-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
 }
 
-/* Auto Optimize */
-.optimize-container {
-  max-width: 1200px;
-}
-
-.instance-section {
+.compare-panel {
+  flex: 1;
+  overflow-y: auto;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 24px;
-  margin-bottom: 24px;
-  box-shadow: var(--shadow-sm);
+  padding: 16px;
 }

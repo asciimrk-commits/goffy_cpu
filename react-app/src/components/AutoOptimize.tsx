@@ -95,8 +95,33 @@ export function AutoOptimize() {
         const isAssigned = (cpu: string) => (proposed[cpu]?.length || 0) > 0;
 
         // === 1. Analyze Input & Calculate Demand ===
+        // Detect instances
         const detectedInstances: string[] = [];
         const instanceData: Record<string, Record<string, string[]>> = {};
+
+        const rawInstances = new Set<string>();
+        Object.values(instances).forEach(() => {
+            // If Physical has roles like "HUB7:..."
+            // actually parser split them.
+        });
+        // We rely on what parser provided.
+        // But for Auto-Opt, we usually start from scratch or existing?
+        // KB says "Full Rewrite".
+        // We will detect instance names from the `instances` object keys (excluding Physical)
+        // OR scan the 'Physical' map for roles that look like instance tags?
+        // Actually earlier code used `parsed.instances` keys.
+
+        Object.keys(instances).forEach(k => {
+            if (k !== 'Physical' && k !== 'OS') rawInstances.add(k);
+        });
+
+        detectedInstances.push(...Array.from(rawInstances).sort());
+
+        // Calculate Demand
+        calcNeeded(getTotalLoad(instances['OS'] ? Object.keys(instances['OS']) : []), 25);
+
+        // Setup Instance Demands
+        // (Removed empty loop)
 
         // Parse existing roles
         Object.entries(instances).forEach(([instName, cpuMap]) => {
@@ -507,7 +532,7 @@ export function AutoOptimize() {
 
                 {/* Right col: Mini Maps */}
                 <div style={{ flex: '1 1 300px' }}>
-                    {Object.keys(instanceOwnership).filter(i => i !== 'OS').map(i => renderInstanceTopology(i))}
+                    {instanceOrder.map(i => renderInstanceTopology(i))}
                 </div>
             </div>
         </div>
