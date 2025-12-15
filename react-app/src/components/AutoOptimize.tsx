@@ -291,72 +291,75 @@ export function AutoOptimize() {
                                     <div className="numa-header" style={{ color: isNet ? 'var(--color-success)' : 'var(--text-secondary)' }}>
                                         NUMA {numaId} {isNet && '[NET]'}
                                     </div>
-                                    <div className="cmp-cores">
-                                        {Object.entries(l3Data).flatMap(([, cores]) => cores).map(cpuId => {
-                                            // Determine Owner
-                                            // Check all instances
-                                            const owners: string[] = [];
-                                            const roles: string[] = [];
+                                    <div className="cmp-cores" style={{ gap: '8px' }}>
+                                        {/* Group by L3 */}
+                                        {Object.entries(l3Data).map(([l3Id, cores]) => (
+                                            <div key={l3Id} className="l3-group">
+                                                <div className="l3-header">L3: {l3Id}</div>
+                                                <div className="l3-cores">
+                                                    {cores.map(cpuId => {
+                                                        // Determine Owner
+                                                        const owners: string[] = [];
+                                                        const roles: string[] = [];
 
-                                            Object.entries(instanceOwnership).forEach(([inst, set]) => {
-                                                if (set.has(cpuId)) {
-                                                    owners.push(inst);
-                                                    // Get roles for this core in this instance
-                                                    const r = proposedAllocation?.[inst]?.[String(cpuId)] || [];
-                                                    roles.push(...r);
-                                                }
-                                            });
+                                                        Object.entries(instanceOwnership).forEach(([inst, set]) => {
+                                                            if (set.has(cpuId)) {
+                                                                owners.push(inst);
+                                                                const r = proposedAllocation?.[inst]?.[String(cpuId)] || [];
+                                                                roles.push(...r);
+                                                            }
+                                                        });
 
-                                            const uniqueOwners = [...new Set(owners)];
+                                                        const uniqueOwners = [...new Set(owners)];
 
-                                            // Color Logic
-                                            let background = 'var(--bg-panel)';
-                                            let border = '2px solid transparent';
+                                                        // Color Logic
+                                                        let background = 'var(--bg-panel)';
+                                                        let border = '2px solid transparent';
 
-                                            if (uniqueOwners.length === 1) {
-                                                background = instColors[uniqueOwners[0]] || '#334155';
-                                            } else if (uniqueOwners.length > 1) {
-                                                // Intersection!
-                                                // Check if it's OS/IRQ (Shared by design)
-                                                const isSystem = roles.includes('sys_os') || roles.includes('net_irq');
-                                                if (isSystem) {
-                                                    background = SHARED_COLOR;
-                                                    border = '2px dashed #fff';
-                                                } else {
-                                                    // Real intersection (collision?)
-                                                    background = 'repeating-linear-gradient(45deg, #606dbc, #606dbc 10px, #465298 10px, #465298 20px)';
-                                                }
-                                            }
+                                                        if (uniqueOwners.length === 1) {
+                                                            background = instColors[uniqueOwners[0]] || '#334155';
+                                                        } else if (uniqueOwners.length > 1) {
+                                                            const isSystem = roles.includes('sys_os') || roles.includes('net_irq');
+                                                            if (isSystem) {
+                                                                background = SHARED_COLOR;
+                                                                border = '2px dashed #fff';
+                                                            } else {
+                                                                background = 'repeating-linear-gradient(45deg, #606dbc, #606dbc 10px, #465298 10px, #465298 20px)';
+                                                            }
+                                                        }
 
-                                            // Opacity for Hover
-                                            let opacity = 1;
-                                            if (hoveredInstance) {
-                                                if (!uniqueOwners.includes(hoveredInstance) && !roles.includes('sys_os') && !roles.includes('net_irq')) {
-                                                    opacity = 0.2;
-                                                }
-                                            }
+                                                        // Opacity for Hover
+                                                        let opacity = 1;
+                                                        if (hoveredInstance) {
+                                                            if (!uniqueOwners.includes(hoveredInstance) && !roles.includes('sys_os') && !roles.includes('net_irq')) {
+                                                                opacity = 0.2;
+                                                            }
+                                                        }
 
-                                            return (
-                                                <div
-                                                    key={cpuId}
-                                                    className="core"
-                                                    onMouseEnter={() => uniqueOwners.length > 0 && setHoveredInstance(uniqueOwners[0])}
-                                                    onMouseLeave={() => setHoveredInstance(null)}
-                                                    title={`Core ${cpuId}\nInstances: ${uniqueOwners.join(', ')}\nRoles: ${[...new Set(roles)].join(', ')}`}
-                                                    style={{
-                                                        background,
-                                                        border,
-                                                        opacity,
-                                                        transition: 'opacity 0.2s',
-                                                        color: '#fff',
-                                                        cursor: uniqueOwners.length > 0 ? 'default' : 'not-allowed',
-                                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                                    }}
-                                                >
-                                                    {cpuId}
+                                                        return (
+                                                            <div
+                                                                key={cpuId}
+                                                                className="core"
+                                                                onMouseEnter={() => uniqueOwners.length > 0 && setHoveredInstance(uniqueOwners[0])}
+                                                                onMouseLeave={() => setHoveredInstance(null)}
+                                                                title={`Core ${cpuId}\nInstances: ${uniqueOwners.join(', ')}\nRoles: ${[...new Set(roles)].join(', ')}`}
+                                                                style={{
+                                                                    background,
+                                                                    border,
+                                                                    opacity,
+                                                                    transition: 'opacity 0.2s',
+                                                                    color: '#fff',
+                                                                    cursor: uniqueOwners.length > 0 ? 'default' : 'not-allowed',
+                                                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                                }}
+                                                            >
+                                                                {cpuId}
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
-                                            );
-                                        })}
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             );
