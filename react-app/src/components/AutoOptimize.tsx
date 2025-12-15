@@ -31,6 +31,16 @@ export function AutoOptimize() {
 
         const netNuma = String(netNumaNodes[0] ?? 0);
         const isolatedSet = new Set(isolatedCores.map(String));
+        const coreLoads = useAppStore.getState().coreLoads;
+
+        // Helper: Get average load for cores
+        const getAvgLoad = (cores: string[]): number => {
+            if (!cores?.length) return 0;
+            const total = cores.reduce((sum, c) => sum + (coreLoads[parseInt(c)] || 0), 0);
+            return total / cores.length;
+        };
+
+
 
         // Analyze topology - collect cores by NUMA and L3
         const byNuma: Record<string, number[]> = {};
@@ -58,6 +68,7 @@ export function AutoOptimize() {
             });
         });
 
+        const totalCores = Object.keys(byNuma).reduce((sum, n) => sum + byNuma[n].length, 0);
         const proposed: Record<string, string[]> = {};
         const recs: Recommendation[] = [];
 
@@ -68,24 +79,45 @@ export function AutoOptimize() {
         };
         const isAssigned = (cpu: number | string) => (proposed[String(cpu)]?.length || 0) > 0;
 
-        const netNumaCores = byNuma[netNuma] || [];
+
         const netL3Pools = byNumaL3[netNuma] || {};
         const netL3Keys = Object.keys(netL3Pools).sort();
 
         // === OS Cores ===
-        let osCores = netNumaCores.filter(c => !isolatedSet.has(String(c)));
+        // KB: OS from 0 to N CONSECUTIVE, target ~20% load
+        const allCoresSorted = Object.values(byNuma).flat().sort((a, b) => a - b);
+        let osCores = allCoresSorted.filter(c => !isolatedSet.has(String(c)));
+
         if (osCores.length === 0) {
-            osCores = currentRoles['sys_os']?.map(Number) || netNumaCores.slice(0, 2);
+            // Fallback: use existing or first cores
+            osCores = currentRoles['sys_os']?.map(Number) || allCoresSorted.slice(0, 2);
         }
-        const osNeeded = Math.max(2, Math.min(osCores.length, 8));
+
+        // Calculate OS needed based on 20% load target
+        const osLoad = getAvgLoad(currentRoles['sys_os'] || osCores.map(String));
+        const osCoreCount = currentRoles['sys_os']?.length || osCores.length;
+        let osNeeded: number;
+
+        if (osLoad > 0) {
+            // Formula: current_cores * current_load% / target_20%
+            osNeeded = Math.max(1, Math.ceil(osLoad * osCoreCount / 20));
+        } else {
+            // No load data: use conservative estimate
+            if (totalCores >= 100) osNeeded = 4;
+            else if (totalCores <= 12) osNeeded = 1;
+            else osNeeded = 2;
+        }
+        osNeeded = Math.min(osNeeded, osCores.length);
+
+        // Assign consecutive OS cores starting from 0
         const assignedOsCores = osCores.slice(0, osNeeded);
         assignedOsCores.forEach(c => assignRole(c, 'sys_os'));
         recs.push({
             title: '[OS]',
             cores: assignedOsCores,
-            description: `${assignedOsCores.length} ядер`,
+            description: `${assignedOsCores.length} ядер (0-${assignedOsCores.length - 1})`,
             role: 'sys_os',
-            rationale: 'Системные процессы',
+            rationale: `~${osLoad.toFixed(0)}% → 20% target`,
         });
 
         // Find service L3 (containing OS cores)
@@ -124,24 +156,29 @@ export function AutoOptimize() {
         let svcIdx = 0;
         const getSvc = () => svcIdx < servicePool.length ? servicePool[svcIdx++] : null;
 
-        // === Trash + RF + Click ===
+        // === Trash + ClickHouse (NOT AR!) ===
+        // KB: Trash + RF + ClickHouse on 1 core, RF can also go to AR
         const trashCore = getSvc();
         if (trashCore !== null) {
             assignRole(trashCore, 'trash');
-            assignRole(trashCore, 'rf');
             assignRole(trashCore, 'click');
+            // RF will be added to AR if available, else to trash later
             recs.push({
-                title: '[TRASH+RF+CLICK]',
+                title: '[TRASH+CLICK]',
                 cores: [trashCore],
                 description: `Ядро ${trashCore}`,
                 role: 'trash',
-                rationale: 'Сервисный L3',
+                rationale: '"Грязный" L3',
             });
         }
 
-        // === UDP (if exists in current) ===
-        if ((currentRoles['udp']?.length || 0) > 0) {
-            const udpCore = getSvc();
+        // === UDP Handler ===
+        // KB: Separate core if >10k pps, else can share with trash
+        const hasUdpInInput = (currentRoles['udp']?.length || 0) > 0;
+        let udpCore: number | null = null;
+
+        if (hasUdpInInput) {
+            udpCore = getSvc();
             if (udpCore !== null) {
                 assignRole(udpCore, 'udp');
                 recs.push({
@@ -149,28 +186,45 @@ export function AutoOptimize() {
                     cores: [udpCore],
                     description: `Ядро ${udpCore}`,
                     role: 'udp',
-                    rationale: 'Макс 1',
+                    rationale: 'Отдельное ядро',
                 });
             }
+        } else if (trashCore !== null) {
+            // Low traffic: share with trash
+            assignRole(trashCore, 'udp');
         }
 
-        // === AR + Formula ===
+        // === AR + RF + Formula (NEVER with Trash!) ===
+        // KB: AR must not be with Trash! RF can be with AR or Trash
         const arCore = getSvc();
         if (arCore !== null) {
             assignRole(arCore, 'ar');
+            assignRole(arCore, 'rf');  // RF prefers AR
             assignRole(arCore, 'formula');
             recs.push({
-                title: '[AR+FORMULA]',
+                title: '[AR+RF+FORMULA]',
                 cores: [arCore],
                 description: `Ядро ${arCore}`,
                 role: 'ar',
                 rationale: 'НЕ на Trash!',
             });
+        } else if (trashCore !== null) {
+            // Fallback: RF on trash if no AR core
+            assignRole(trashCore, 'rf');
         }
 
-        // === IRQ + Gateways (Mandatory!) ===
-        const neededIrq = Math.max(2, currentRoles['net_irq']?.length || 2);
-        const neededGw = Math.max(4, Math.ceil((currentRoles['gateway']?.length || 4) * 1.2));
+        // === IRQ ===
+        // KB: 1 IRQ per 4 gateways, min 1, max 6
+        const gwCount = currentRoles['gateway']?.length || 1;
+        const neededIrq = Math.min(6, Math.max(1, Math.ceil(gwCount / 4)));
+
+        // === Gateways ===
+        // KB: Target ~20% load
+        const gwLoad = getAvgLoad(currentRoles['gateway']);
+        const gwCoreCount = currentRoles['gateway']?.length || 1;
+        const neededGw = gwLoad > 0
+            ? Math.max(1, Math.ceil(gwLoad * gwCoreCount / 20))
+            : Math.max(1, gwCoreCount);
 
         // Build work pool
         const workPool: Record<string, number[]> = {};
@@ -321,6 +375,19 @@ export function AutoOptimize() {
             });
         }
 
+        // Check for minimum robots
+        const allRobotCores = [...isoRobots, ...pool1, ...pool2, ...defCores];
+        if (allRobotCores.length === 0) {
+            recs.push({
+                title: '[WARNING]',
+                cores: [],
+                description: 'НЕТ РОБОТОВ!',
+                role: 'robot_default',
+                rationale: 'Trading не будет работать!',
+                warning: 'Критично!',
+            });
+        }
+
         setRecommendations(recs);
         setResult(`Generated ${recs.length} recommendations`);
     };
@@ -334,13 +401,13 @@ export function AutoOptimize() {
                 if (!proposed[cpuStr].includes(rec.role)) {
                     proposed[cpuStr].push(rec.role);
                 }
-                // Special cases: trash also gets rf, click
+                // Special case: trash gets click (NOT rf!)
                 if (rec.role === 'trash') {
-                    if (!proposed[cpuStr].includes('rf')) proposed[cpuStr].push('rf');
                     if (!proposed[cpuStr].includes('click')) proposed[cpuStr].push('click');
                 }
-                // ar also gets formula
+                // ar gets rf + formula
                 if (rec.role === 'ar') {
+                    if (!proposed[cpuStr].includes('rf')) proposed[cpuStr].push('rf');
                     if (!proposed[cpuStr].includes('formula')) proposed[cpuStr].push('formula');
                 }
             });
