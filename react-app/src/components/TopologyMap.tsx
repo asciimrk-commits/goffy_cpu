@@ -68,19 +68,27 @@ function Core({ cpuId, roles, ownerInstance, instanceColor, isIsolated, load, on
                     border: borderStyle,
                     cursor: activeTool ? 'pointer' : 'default',
                     position: 'relative',
-                    width: '44px',
-                    height: '44px',
+                    width: '48px',
+                    height: '48px',
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    borderRadius: '6px',
-                    fontSize: '12px',
-                    fontWeight: 600,
+                    borderRadius: 'var(--radius-md)',
+                    fontFamily: 'var(--font-mono)',
                     color: '#fff',
-                    transition: 'transform 0.1s, box-shadow 0.1s'
+                    transition: 'transform 0.1s, box-shadow 0.1s',
+                    boxShadow: 'var(--shadow-sm)'
                 }}
             >
-                <span className="core-id">{cpuId}</span>
+                {/* Physical ID - Large */}
+                <span style={{ fontSize: '14px', fontWeight: 700, lineHeight: 1 }}>{cpuId}</span>
+                {/* Role indicator - Small */}
+                {primaryRole && (
+                    <span style={{ fontSize: '8px', opacity: 0.8, textTransform: 'uppercase', marginTop: '2px' }}>
+                        {ROLES[primaryRole]?.name?.substring(0, 3) || ''}
+                    </span>
+                )}
                 {/* Instance badge */}
                 {ownerInstance && ownerInstance !== 'Physical' && (
                     <div style={{
