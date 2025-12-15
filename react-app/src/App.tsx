@@ -55,9 +55,21 @@ function App() {
 
           <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
             {serverName && (
-              <div className="header-info">
-                <span className="server-name">{serverName}</span>
-                {date && <span className="server-date">{date.replace('T', ' ').replace(/\+.*/, '')}</span>}
+              <div className="header-info" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span className="server-name" style={{
+                  fontWeight: 600,
+                  color: 'var(--color-primary)',
+                  fontSize: '14px'
+                }}>{serverName}</span>
+                {date && (
+                  <>
+                    <span style={{ color: 'var(--text-muted)' }}>|</span>
+                    <span className="server-date" style={{
+                      color: 'var(--text-muted)',
+                      fontSize: '12px'
+                    }}>{date.replace('T', ' ').replace(/\+.*/, '')}</span>
+                  </>
+                )}
               </div>
             )}
             <button onClick={toggleTheme} className="theme-toggle" title="Toggle Theme">

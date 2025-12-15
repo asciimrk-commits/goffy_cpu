@@ -109,20 +109,20 @@ button.primary:hover,
 .content {
   flex: 1;
   overflow: hidden;
-  /* Prevent scrollbar on body */
   position: relative;
-  padding: 20px;
+  /* Remove padding from content - let children handle it */
 }
 
 /* Mapper Dashboard Grid */
 .mapper-dashboard {
   display: grid;
   grid-template-columns: 320px 1fr 340px;
-  /* FIXED WIDTHS for side panels */
   grid-template-rows: 100%;
-  gap: 20px;
+  gap: 16px;
   height: 100%;
   width: 100%;
+  padding: 16px;
+  box-sizing: border-box;
 }
 
 .card {
