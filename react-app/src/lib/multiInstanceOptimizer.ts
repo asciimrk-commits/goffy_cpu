@@ -621,7 +621,7 @@ export function generateRedistributionPlan(
     input: OptimizerInput,
     analysis: OptimizationResult
 ): RedistributionPlan {
-    const { coreNumaMap, netNumaNodes, coreLoads } = input;
+    const { coreNumaMap, netNumaNodes } = input;
     const allCores = Object.keys(coreNumaMap).map(Number).sort((a, b) => a - b);
     const netNuma = netNumaNodes.length > 0 ? netNumaNodes[0] : 0;
     const totalCores = allCores.length;
@@ -639,7 +639,8 @@ export function generateRedistributionPlan(
     const allNumaNodes = [...new Set(Object.values(coreNumaMap))].sort((a, b) => a - b);
     const otherNumaNodes = allNumaNodes.filter(n => n !== netNuma);
 
-    const netNumaCores = getCoresByNuma(netNuma);
+    // NUMA 0 cores (for OS) - NOT network NUMA necessarily!
+    const numa0Cores = getCoresByNuma(0);
     const otherNumaCores = otherNumaNodes.flatMap(n => getCoresByNuma(n)).sort((a, b) => a - b);
 
     const proposedOs: number[] = [];
@@ -647,21 +648,14 @@ export function generateRedistributionPlan(
     const sharedIrq: number[] = [];
     const instanceAllocations: RedistributionPlan['instanceAllocations'] = {};
 
-    // ===== STEP 1: Calculate OS cores based on LOAD =====
-    // Target: OS cores should run at ~50% load
-    // Total system load on current OS cores
-    const osLoad = analysis.os.cores.reduce((sum, c) => sum + (coreLoads[c] || 0), 0);
-    const targetLoadPerCore = 0.5; // 50%
+    // ===== STEP 1: OS cores from NUMA 0 (NOT network NUMA!) =====
+    // Use analysis.os.needed which is calculated correctly
+    const osNeeded = analysis.os.needed;
+    const osCorePool = numa0Cores.length > 0 ? numa0Cores : allCores;
 
-    // How many cores needed to achieve 50% load?
-    // If current OS has 2.7 load on 1 core and we want 50%, we need 2.7 / 0.5 = 5.4 ~= 1 core (round up but min 1)
-    // Actually simpler: osNeeded = ceil(osLoad / targetLoadPerCore) but min 1, max 3
-    const osNeeded = Math.max(1, Math.min(3, Math.ceil(osLoad / targetLoadPerCore / allCores.length * 2)));
-
-    // Take first N cores from network NUMA as OS
-    for (let i = 0; i < osNeeded && i < netNumaCores.length; i++) {
-        proposedOs.push(netNumaCores[i]);
-        assigned.add(netNumaCores[i]);
+    for (let i = 0; i < osNeeded && i < osCorePool.length; i++) {
+        proposedOs.push(osCorePool[i]);
+        assigned.add(osCorePool[i]);
     }
 
     changes.push(`### Physical / OS Layer ###`);
@@ -674,13 +668,14 @@ export function generateRedistributionPlan(
         }
     });
 
-    // ===== STEP 2: IRQ from isolated pool =====
-    // Pick first isolated core on network NUMA for IRQ
-    const isolatedNetCores = proposedIsolated.filter(c => getCoresByNuma(netNuma).includes(c));
-    if (isolatedNetCores.length > 0) {
-        const irqCore = isolatedNetCores[0];
-        sharedIrq.push(irqCore);
-        assigned.add(irqCore);
+    // ===== STEP 2: IRQ from isolated pool on NETWORK NUMA =====
+    // Use analysis.irq.needed which is calculated correctly
+    const irqNeeded = analysis.irq.needed;
+    const isolatedNetCores = proposedIsolated.filter(c => getCoresByNuma(netNuma).includes(c) && !assigned.has(c));
+
+    for (let i = 0; i < irqNeeded && i < isolatedNetCores.length; i++) {
+        sharedIrq.push(isolatedNetCores[i]);
+        assigned.add(isolatedNetCores[i]);
     }
     changes.push(`IRQ (Net): [${sharedIrq.join(', ')}]`);
 
@@ -746,8 +741,9 @@ export function generateRedistributionPlan(
             changes.push(`Gateway: [${gateways.join(', ')}]`);
             changes.push(`Robots: [${robotCores.join(', ')}]`);
         } else {
-            // LARGE SYSTEM: more separation
-            const gwCount = Math.max(3, Math.min(6, current.gateways || 4));
+            // LARGE SYSTEM: use calculated needs
+            const instNeeds = analysis.instances[instName].needs;
+            const gwCount = instNeeds.gateways || Math.max(3, Math.min(6, current.gateways || 4));
 
             // Services on network NUMA
             const trash = takeCores(1);
