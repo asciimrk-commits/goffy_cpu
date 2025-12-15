@@ -1,18 +1,23 @@
 /**
- * HFT CPU Optimizer with L3 Cache Partitioning Strategy
+ * HFT Core Commander - Advanced CPU Optimizer
  * 
- * "Stealth Engineering" - Bloomberg Terminal Level Optimization
+ * L3 Zone Classification:
+ * - DIRTY: Contains Core 0 (OS) - place service bundles here
+ * - GOLD: Network NUMA L3s (excl DIRTY) - Gateways + IRQ
+ * - SILVER: All other L3s - Robots + overflow
  */
 
 // =====================================================
 // TYPES
 // =====================================================
 
+export type L3Zone = 'dirty' | 'gold' | 'silver';
+
 export interface L3Cache {
     id: string;
     numa: number;
     cores: number[];
-    zone: 'dirty' | 'mixed' | 'pure';
+    zone: L3Zone;
 }
 
 export interface NumaNode {
@@ -22,13 +27,21 @@ export interface NumaNode {
     totalCores: number;
 }
 
+// Instance model with priority and weight
+export interface Instance {
+    id: string;
+    type: 'PROD' | 'TEST' | 'DEV';
+    weight: number;  // 0.0 - 1.0
+    priority: number; // Lower = higher priority
+}
+
 export interface OptimizationInput {
     geometry: Record<string, Record<string, Record<string, number[]>>>;
     coreNumaMap: Record<string, number>;
     l3Groups: Record<string, number[]>;
     netNumaNodes: number[];
     coreLoads: Record<number, number>;
-    instanceCount: number;  // 1 or 2
+    instances: Instance[];  // Multi-instance support
 }
 
 export interface CoreAllocation {
@@ -37,7 +50,7 @@ export interface CoreAllocation {
     instance?: string;
     l3Id: string;
     numa: number;
-    zone: 'dirty' | 'mixed' | 'pure';
+    zone: L3Zone;
 }
 
 export interface OptimizationResult {
@@ -58,8 +71,6 @@ export interface OptimizationResult {
 // CONSTANTS
 // =====================================================
 
-const WEIGHT_MAIN = 0.70;  // 70% for main instance
-// WEIGHT_AUX = 1 - WEIGHT_MAIN (30% for aux instance)
 const GW_TO_IRQ_RATIO = 3; // 1 IRQ per 3 Gateways
 const MAX_GW_PER_INSTANCE = 10;
 
@@ -68,11 +79,7 @@ const MAX_GW_PER_INSTANCE = 10;
 // =====================================================
 
 /**
- * Classify L3 caches into Dirty/Mixed/Pure zones
- * 
- * - Dirty (L3 #0): Contains OS cores -> place Trash+AR bundles
- * - Mixed (L3 #1): IRQ + Gateways
- * - Pure (L3 #2+): Gateways + Robots only
+ * Classify L3 caches into DIRTY/GOLD/SILVER zones
  */
 export function classifyL3Zones(
     l3Groups: Record<string, number[]>,
@@ -83,41 +90,22 @@ export function classifyL3Zones(
     const osSet = new Set(osCores);
     const l3Caches: L3Cache[] = [];
 
-    // Get network NUMA L3 caches first, then others
-    const entries = Object.entries(l3Groups).sort((a, b) => {
-        const numaA = coreNumaMap[String(a[1][0])] ?? 0;
-        const numaB = coreNumaMap[String(b[1][0])] ?? 0;
-        // Network NUMA first
-        if (numaA === netNuma && numaB !== netNuma) return -1;
-        if (numaB === netNuma && numaA !== netNuma) return 1;
-        return parseInt(a[0]) - parseInt(b[0]);
-    });
-
-    let netL3Index = 0;
-
-    entries.forEach(([l3Id, cores]) => {
+    Object.entries(l3Groups).forEach(([l3Id, cores]) => {
         const numa = coreNumaMap[String(cores[0])] ?? 0;
         const hasOsCores = cores.some(c => osSet.has(c));
         const isNetNuma = numa === netNuma;
 
-        let zone: 'dirty' | 'mixed' | 'pure';
+        let zone: L3Zone;
 
         if (hasOsCores) {
             zone = 'dirty';
-        } else if (isNetNuma && netL3Index === 1) {
-            zone = 'mixed';
+        } else if (isNetNuma) {
+            zone = 'gold';
         } else {
-            zone = 'pure';
+            zone = 'silver';
         }
 
-        if (isNetNuma) netL3Index++;
-
-        l3Caches.push({
-            id: l3Id,
-            numa,
-            cores,
-            zone
-        });
+        l3Caches.push({ id: l3Id, numa, cores, zone });
     });
 
     return l3Caches;
@@ -130,14 +118,13 @@ export function classifyL3Zones(
 /**
  * optimizeTopology - The Brain
  * 
- * Implements the 4-step algorithm:
- * 1. Global Tax (OS)
- * 2. Fixed Service Tax (Anchors)
- * 3. Variable Tax (GW + IRQ)
- * 4. Computation (Robots)
+ * Phase 1: Zoning (Hardware Classification)
+ * Phase 2: Global Tax (OS + Service Bundles)
+ * Phase 3: Critical Path (Gateways & IRQ)
+ * Phase 4: Computation (Robots)
  */
 export function optimizeTopology(input: OptimizationInput): OptimizationResult {
-    const { coreNumaMap, l3Groups, netNumaNodes, instanceCount } = input;
+    const { coreNumaMap, l3Groups, netNumaNodes, instances } = input;
     const netNuma = netNumaNodes[0] ?? 0;
 
     const allCores = Object.keys(coreNumaMap).map(Number).sort((a, b) => a - b);
@@ -147,17 +134,19 @@ export function optimizeTopology(input: OptimizationInput): OptimizationResult {
     const warnings: string[] = [];
     const assigned = new Set<number>();
 
+    // Sort instances by priority
+    const sortedInstances = [...instances].sort((a, b) => a.priority - b.priority);
+    const instanceCount = sortedInstances.length;
+
     // Get cores by NUMA
     const getCoresByNuma = (numa: number): number[] => {
         return allCores.filter(c => coreNumaMap[String(c)] === numa).sort((a, b) => a - b);
     };
 
-    const numa0Cores = getCoresByNuma(0);  // Always OS on NUMA 0
+    const numa0Cores = getCoresByNuma(0);
     const netNumaCores = getCoresByNuma(netNuma);
-    // remoteNumaCores used for robot allocation priority
 
-    // ===== STEP 1: Global Tax (OS) =====
-    // OS cores fixed on Node 0, starting from index 0
+    // ===== PHASE 2: Global Tax (OS) =====
     const osCount = totalCores < 48 ? 4 : Math.min(8, Math.ceil(totalCores / 12));
     const osCores: number[] = [];
 
@@ -166,38 +155,36 @@ export function optimizeTopology(input: OptimizationInput): OptimizationResult {
         assigned.add(numa0Cores[i]);
     }
 
-    // Classify L3 zones
+    // Classify L3 zones after OS assignment
     const l3Zones = classifyL3Zones(l3Groups, coreNumaMap, netNuma, osCores);
     const dirtyL3 = l3Zones.find(z => z.zone === 'dirty');
-    const mixedL3 = l3Zones.find(z => z.zone === 'mixed');
-    // Pure L3s are used for gateway overflow and robots
+    const goldL3s = l3Zones.filter(z => z.zone === 'gold');
+    // silverL3s used for robot allocation (implicit via getAvailableFromZone)
 
     // Helper to add allocation
-    const allocate = (coreId: number, role: string, instance?: string) => {
+    const allocate = (coreId: number, role: string, instanceId?: string) => {
         const l3 = l3Zones.find(z => z.cores.includes(coreId));
         allocations.push({
             coreId,
             role,
-            instance,
+            instance: instanceId,
             l3Id: l3?.id ?? '0',
             numa: coreNumaMap[String(coreId)] ?? 0,
-            zone: l3?.zone ?? 'pure'
+            zone: l3?.zone ?? 'silver'
         });
         assigned.add(coreId);
     };
 
-    // Get available cores from specific L3
+    // Get available cores from L3
     const getAvailableFromL3 = (l3: L3Cache | undefined, count: number): number[] => {
         if (!l3) return [];
-        const available = l3.cores.filter(c => !assigned.has(c));
-        return available.slice(0, count);
+        return l3.cores.filter(c => !assigned.has(c)).slice(0, count);
     };
 
     // Get available cores from zone
-    const getAvailableFromZone = (zone: 'dirty' | 'mixed' | 'pure', count: number): number[] => {
+    const getAvailableFromZone = (zone: L3Zone, count: number): number[] => {
         const result: number[] = [];
         const targetL3s = l3Zones.filter(z => z.zone === zone);
-
         for (const l3 of targetL3s) {
             for (const core of l3.cores) {
                 if (!assigned.has(core) && result.length < count) {
@@ -208,85 +195,72 @@ export function optimizeTopology(input: OptimizationInput): OptimizationResult {
         return result;
     };
 
-    // ===== STEP 2: Fixed Service Tax (Anchors) =====
-    // Each instance pays 2 cores on Network Node (in Dirty L3!)
-    const instances = instanceCount === 2 ? ['MAIN', 'AUX'] : ['MAIN'];
-
-    instances.forEach(inst => {
-        // Core A: Trash Bundle (Trash + RF + ClickHouse) - Dirty L3
+    // ===== PHASE 2 continued: Service Bundles (in DIRTY L3) =====
+    sortedInstances.forEach(inst => {
+        // Trash Bundle (Trash + RF + ClickHouse)
         const trashCores = getAvailableFromL3(dirtyL3, 1);
         if (trashCores.length > 0) {
-            allocate(trashCores[0], 'trash_bundle', inst);
+            allocate(trashCores[0], 'trash_bundle', inst.id);
+        } else {
+            // Overflow to SILVER (never GOLD!)
+            const overflow = getAvailableFromZone('silver', 1);
+            if (overflow.length > 0) {
+                allocate(overflow[0], 'trash_bundle', inst.id);
+                warnings.push(`Service bundle for ${inst.id} placed in SILVER (DIRTY full)`);
+            }
         }
 
-        // Core B: AR Bundle (AllRobots + Formula) - Dirty L3
+        // AR Bundle (AllRobots + Formula)
         const arCores = getAvailableFromL3(dirtyL3, 1);
         if (arCores.length > 0) {
-            allocate(arCores[0], 'ar_bundle', inst);
+            allocate(arCores[0], 'ar_bundle', inst.id);
+        } else {
+            const overflow = getAvailableFromZone('silver', 1);
+            if (overflow.length > 0) {
+                allocate(overflow[0], 'ar_bundle', inst.id);
+            }
         }
     });
 
-    // ===== STEP 3: Variable Tax (Gateways & IRQ) =====
-    // Calculate remaining network capacity
+    // ===== PHASE 3: Critical Path (Gateways & IRQ) =====
     const netCapacity = netNumaCores.filter(c => !assigned.has(c)).length;
+    const totalWeight = sortedInstances.reduce((sum, i) => sum + i.weight, 0);
 
-    // Split capacity by weight if 2 instances
-    const capacityMain = instanceCount === 2
-        ? Math.floor(netCapacity * WEIGHT_MAIN)
-        : netCapacity;
-    const capacityAux = instanceCount === 2
-        ? netCapacity - capacityMain
-        : 0;
-
-    const allocateGwIrq = (capacity: number, instance: string) => {
-        // Max 10 GW per instance
-        const gwCount = Math.min(MAX_GW_PER_INSTANCE, Math.floor(capacity * 0.75));
+    sortedInstances.forEach((inst, idx) => {
+        const capacityShare = Math.floor(netCapacity * (inst.weight / totalWeight));
+        const gwCount = Math.min(MAX_GW_PER_INSTANCE, Math.floor(capacityShare * 0.75));
         const irqCount = Math.ceil(gwCount / GW_TO_IRQ_RATIO);
 
-        // IRQ cores go to Mixed L3
-        const irqCores = getAvailableFromL3(mixedL3, irqCount);
-        irqCores.forEach(c => allocate(c, 'irq', instance));
+        // For PROD: try to get exclusive GOLD L3
+        const targetL3 = inst.type === 'PROD' && goldL3s[idx] ? goldL3s[idx] : goldL3s[0];
 
-        // Gateway cores go to Mixed L3 first, then Pure
-        let gwAllocated = 0;
-        const mixedGw = getAvailableFromL3(mixedL3, gwCount);
-        mixedGw.forEach(c => {
-            allocate(c, 'gateway', instance);
-            gwAllocated++;
-        });
+        // IRQ cores in GOLD
+        const irqCores = getAvailableFromL3(targetL3, irqCount);
+        irqCores.forEach(c => allocate(c, 'irq', inst.id));
 
-        if (gwAllocated < gwCount) {
-            const pureGw = getAvailableFromZone('pure', gwCount - gwAllocated);
-            pureGw.forEach(c => allocate(c, 'gateway', instance));
+        // Gateway cores in same GOLD L3
+        const gwCores = getAvailableFromL3(targetL3, gwCount);
+        gwCores.forEach(c => allocate(c, 'gateway', inst.id));
+
+        // Overflow to other GOLD L3s
+        const remaining = gwCount - gwCores.length;
+        if (remaining > 0) {
+            const overflow = getAvailableFromZone('gold', remaining);
+            overflow.forEach(c => allocate(c, 'gateway', inst.id));
         }
-    };
+    });
 
-    allocateGwIrq(capacityMain, 'MAIN');
-    if (instanceCount === 2) {
-        allocateGwIrq(capacityAux, 'AUX');
-    }
-
-    // ===== STEP 4: Computation (Robots) =====
-    // All remaining cores go to Robot Pools
+    // ===== PHASE 4: Computation (Robots) =====
+    // Fill SILVER first, then GOLD tail
     const remainingCores = allCores.filter(c => !assigned.has(c) && !osCores.includes(c));
 
     remainingCores.forEach((c, idx) => {
-        const instance = instanceCount === 2
-            ? (idx % 3 < 2 ? 'MAIN' : 'AUX')  // 70/30 split
-            : 'MAIN';
-        allocate(c, 'robot', instance);
+        const inst = sortedInstances[idx % instanceCount] || sortedInstances[0];
+        allocate(c, 'robot', inst?.id);
     });
 
     // Build isolated cores (all except OS)
     const isolatedCores = allCores.filter(c => !osCores.includes(c));
-
-    // Summary
-    const summary = {
-        osCount: osCores.length,
-        irqCount: allocations.filter(a => a.role === 'irq').length,
-        gwCount: allocations.filter(a => a.role === 'gateway').length,
-        robotCount: allocations.filter(a => a.role === 'robot').length
-    };
 
     return {
         allocations,
@@ -294,12 +268,17 @@ export function optimizeTopology(input: OptimizationInput): OptimizationResult {
         isolatedCores,
         l3Zones,
         warnings,
-        summary
+        summary: {
+            osCount: osCores.length,
+            irqCount: allocations.filter(a => a.role === 'irq').length,
+            gwCount: allocations.filter(a => a.role === 'gateway').length,
+            robotCount: allocations.filter(a => a.role === 'robot').length
+        }
     };
 }
 
 // =====================================================
-// L3 VALIDATION
+// VALIDATION
 // =====================================================
 
 export interface ValidationResult {
@@ -311,40 +290,36 @@ export interface ValidationResult {
 /**
  * validateL3Rules - The L3 Guard
  * 
- * Checks L3 Quarantine rules:
- * - Gateway on Dirty L3 → Critical error
- * - IRQ on Remote NUMA → Latency warning
- * - ClickHouse on Pure L3 → Critical error
+ * Rule 1: Gateway + OS in same L3 (DIRTY) → Critical Error
+ * Rule 2: GW + IRQ cross-NUMA → Warning
+ * Rule 3: Service Bundle in GOLD → Warning
  */
 export function validateL3Rules(
     allocations: CoreAllocation[],
-    _l3Zones: L3Cache[],
     netNuma: number
 ): ValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
 
     allocations.forEach(alloc => {
-        // Check zone violations
-
-        // Gateway on Dirty L3 → Error
+        // Rule 1: Gateway on DIRTY → Critical
         if (alloc.role === 'gateway' && alloc.zone === 'dirty') {
             errors.push(
-                `Critical: Gateway (Core ${alloc.coreId}) cannot share L3 with Trash/OS`
+                `Critical: Gateway (Core ${alloc.coreId}) cannot share L3 with OS`
             );
         }
 
-        // IRQ on Remote NUMA → Warning
+        // Rule 2: IRQ cross-socket → Warning
         if (alloc.role === 'irq' && alloc.numa !== netNuma) {
             warnings.push(
-                `Latency Penalty: IRQ (Core ${alloc.coreId}) is cross-socket`
+                `Latency: IRQ (Core ${alloc.coreId}) is cross-socket`
             );
         }
 
-        // ClickHouse/Trash on Pure L3 → Error
-        if ((alloc.role === 'trash_bundle' || alloc.role === 'ar_bundle') && alloc.zone === 'pure') {
-            errors.push(
-                `Critical: ${alloc.role} (Core ${alloc.coreId}) must be in Dirty L3`
+        // Rule 3: Service Bundle in GOLD → Warning
+        if ((alloc.role === 'trash_bundle' || alloc.role === 'ar_bundle') && alloc.zone === 'gold') {
+            warnings.push(
+                `Suboptimal: ${alloc.role} (Core ${alloc.coreId}) is in GOLD L3`
             );
         }
     });
