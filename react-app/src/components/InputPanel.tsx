@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { parseTopology } from '../lib/parser';
 
@@ -16,6 +17,9 @@ export function InputPanel() {
         setInstances
     } = useAppStore();
 
+    const [isExpanded, setIsExpanded] = useState(true);
+    const hasData = rawInput.trim().length > 0;
+
     const handleBuild = () => {
         if (!rawInput.trim()) return;
         try {
@@ -29,6 +33,8 @@ export function InputPanel() {
             setNetNumaNodes(result.netNumaNodes);
             setCoreLoads(result.coreLoads);
             setInstances(result.instances);
+            // Collapse after successful build
+            setIsExpanded(false);
         } catch (e) {
             console.error(e);
             alert('Error parsing input');
@@ -40,38 +46,80 @@ export function InputPanel() {
     };
 
     return (
-        <div className="input-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
-            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '4px' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Input Data</h3>
+        <div className="input-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            {/* Collapsible header */}
+            <div
+                onClick={() => setIsExpanded(!isExpanded)}
+                style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '10px 12px',
+                    cursor: 'pointer',
+                    background: 'var(--bg-input)',
+                    borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+                    marginBottom: isExpanded ? 0 : '0'
+                }}
+            >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600 }}>📥 Input Data</span>
+                    {hasData && !isExpanded && (
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                            ({rawInput.split('\n').length} lines)
+                        </span>
+                    )}
+                </div>
+                <span style={{
+                    transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.2s',
+                    fontSize: '10px'
+                }}>▼</span>
             </div>
 
-            <textarea
-                className="input-area"
-                value={rawInput}
-                onChange={(e) => setRawInput(e.target.value)}
-                placeholder="Paste cpu-map.sh output here..."
-                style={{
+            {/* Collapsible content */}
+            {isExpanded && (
+                <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
                     flex: 1,
-                    resize: 'none',
-                    fontFamily: 'monospace',
-                    fontSize: '11px',
                     padding: '12px',
                     background: 'var(--bg-input)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    color: 'var(--text-main)',
-                    outline: 'none'
-                }}
-            />
+                    borderRadius: '0 0 8px 8px'
+                }}>
+                    <textarea
+                        className="input-area"
+                        value={rawInput}
+                        onChange={(e) => setRawInput(e.target.value)}
+                        placeholder="Paste cpu-map.sh output here..."
+                        style={{
+                            flex: 1,
+                            minHeight: '120px',
+                            resize: 'none',
+                            fontFamily: 'monospace',
+                            fontSize: '10px',
+                            padding: '10px',
+                            background: 'var(--bg-panel)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '6px',
+                            color: 'var(--text-main)',
+                            outline: 'none'
+                        }}
+                    />
 
-            <div className="button-group" style={{ display: 'flex', gap: '12px' }}>
-                <button className="btn-primary" onClick={handleBuild} style={{ flex: 1 }}>Build</button>
-                <button onClick={handleClear} style={{ background: 'transparent', border: '1px solid var(--border-color)' }}>Clear</button>
-            </div>
-
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                Supports <code>cpu-map.sh</code> output.
-            </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="btn-primary" onClick={handleBuild} style={{ flex: 1, padding: '8px' }}>
+                            Build
+                        </button>
+                        <button
+                            onClick={handleClear}
+                            style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border-color)', borderRadius: '6px', fontSize: '12px' }}
+                        >
+                            Clear
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
