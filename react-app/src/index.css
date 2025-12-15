@@ -27,29 +27,42 @@
 
 /* Light Theme (Default) */
 :root:not([data-theme="dark"]) {
-  --bg-app: #f1f5f9; /* Slate 100 */
+  --bg-app: #f1f5f9;
+  /* Slate 100 - Keep same base */
   --bg-panel: #ffffff;
   --bg-input: #f8fafc;
-  --border-color: #e2e8f0; /* Slate 200 */
-  
-  --text-main: #0f172a; /* Slate 900 */
-  --text-secondary: #64748b; /* Slate 500 */
-  --text-muted: #94a3b8; /* Slate 400 */
+  /* Slightly darker than panel */
+  --border-color: #cbd5e1;
+  /* Slate 300 - Higher contrast than 200 */
 
-  --card-shadow: var(--shadow-sm);
+  --text-main: #1e293b;
+  /* Slate 800 - Softer than pure black */
+  --text-secondary: #475569;
+  /* Slate 600 */
+  --text-muted: #94a3b8;
+  /* Slate 400 */
+
+  --card-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
   --header-bg: #ffffff;
 }
 
 /* Dark Theme */
 [data-theme="dark"] {
-  --bg-app: #0f172a; /* Slate 900 */
-  --bg-panel: #1e293b; /* Slate 800 */
-  --bg-input: #334155; /* Slate 700 */
-  --border-color: #334155; /* Slate 700 */
-  
-  --text-main: #f8fafc; /* Slate 50 */
-  --text-secondary: #94a3b8; /* Slate 400 */
-  --text-muted: #64748b; /* Slate 500 */
+  --bg-app: #0f172a;
+  /* Slate 900 */
+  --bg-panel: #1e293b;
+  /* Slate 800 */
+  --bg-input: #334155;
+  /* Slate 700 */
+  --border-color: #334155;
+  /* Slate 700 */
+
+  --text-main: #f8fafc;
+  /* Slate 50 */
+  --text-secondary: #94a3b8;
+  /* Slate 400 */
+  --text-muted: #64748b;
+  /* Slate 500 */
 
   --card-shadow: none;
   --header-bg: #1e293b;
@@ -66,16 +79,23 @@ body {
 }
 
 /* Global Reset & Base Styles */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   margin: 0;
   color: var(--text-main);
 }
+
 h2 {
-    font-size: 1.5rem;
-    font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 600;
 }
+
 p {
-    color: var(--text-secondary);
+  color: var(--text-secondary);
 }
 
 /* Scrollbar */
@@ -83,15 +103,18 @@ p {
   width: 8px;
   height: 8px;
 }
+
 ::-webkit-scrollbar-track {
-  background: var(--bg-app); 
+  background: var(--bg-app);
 }
+
 ::-webkit-scrollbar-thumb {
-  background: var(--border-color); 
+  background: var(--border-color);
   border-radius: 4px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted); 
+  background: var(--text-muted);
 }
 
 /* Button Reset */
@@ -107,26 +130,29 @@ button {
   cursor: pointer;
   transition: all 0.2s;
 }
+
 button:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
   background-color: var(--bg-input);
 }
+
 button.primary {
-    background-color: var(--color-primary);
-    color: white;
-    border: none;
+  background-color: var(--color-primary);
+  color: white;
+  border: none;
 }
+
 button.primary:hover {
-    background-color: var(--color-primary-hover);
-    color: white;
+  background-color: var(--color-primary-hover);
+  color: white;
 }
 
 /* Layout Utilities */
 .card {
-    background: var(--bg-panel);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: 20px;
-    box-shadow: var(--card-shadow);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--card-shadow);
 }
