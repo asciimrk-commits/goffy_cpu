@@ -607,25 +607,24 @@ export interface RedistributionPlan {
 
 /**
  * Generate optimal redistribution plan with NUMA locality
+ * Following HFT_RULES logic from hft-rules.js:
  * 
- * RULES (based on user's optimal config):
- * 1. OS cores: [0,1,2] - 3 cores, NOT isolated
- * 2. IRQ: shared for all instances [8,16] - 1 per NUMA with net traffic
- * 3. Trash: 1 per instance on network NUMA (can share with ClickHouse)
- * 4. UDP: 1 per instance on network NUMA
- * 5. AR: 1 per instance on network NUMA (can share with RF, Formula)
- * 6. Gateways: on network NUMA
- * 7. RF/Formula: can share with AR
- * 8. Robot_Pool_Node0: robots on NUMA 0 (network)
- * 9. Robot_Pool_Node1: robots on NUMA 1 (other)
+ * 1. OS: non-isolated cores on network NUMA (first 2-3)
+ * 2. Trash+RF+ClickHouse: share 1 core per instance (service L3)
+ * 3. AR+Formula: share 1 core per instance (NOT on Trash!)
+ * 4. UDP: separate core per instance
+ * 5. IRQ: min 2 cores, distributed across L3 (shared for all instances)
+ * 6. Gateways: +20% margin, isolated, on network NUMA L3
+ * 7. Robots: tiered pools (Isolated -> Pool1 -> Pool2 -> Default)
  */
 export function generateRedistributionPlan(
     input: OptimizerInput,
     analysis: OptimizationResult
 ): RedistributionPlan {
-    const { coreNumaMap, netNumaNodes } = input;
+    const { coreNumaMap, netNumaNodes, isolatedCores, l3Groups } = input;
     const allCores = Object.keys(coreNumaMap).map(Number).sort((a, b) => a - b);
     const netNuma = netNumaNodes.length > 0 ? netNumaNodes[0] : 0;
+    const isolatedSet = new Set(isolatedCores);
 
     const changes: string[] = [];
     const assigned = new Set<number>();
@@ -640,7 +639,12 @@ export function generateRedistributionPlan(
     const otherNumaNodes = allNumaNodes.filter(n => n !== netNuma);
 
     const netNumaCores = getCoresByNuma(netNuma);
-    const otherNumaCores = otherNumaNodes.flatMap(n => getCoresByNuma(n)).sort((a, b) => a - b);
+
+    // L3 groups on network NUMA
+    const netL3Keys = Object.keys(l3Groups).filter(k => {
+        const cores = l3Groups[k];
+        return cores.length > 0 && coreNumaMap[String(cores[0])] === netNuma;
+    }).sort();
 
     const proposedOs: number[] = [];
     const proposedIsolated: number[] = [];
@@ -648,127 +652,164 @@ export function generateRedistributionPlan(
     const instanceAllocations: RedistributionPlan['instanceAllocations'] = {};
 
     // ===== STEP 1: OS cores =====
-    // OS = first 3 cores [0,1,2] - NOT isolated
-    const osCount = 3;
+    // OS = non-isolated cores on network NUMA
+    const nonIsolatedNet = netNumaCores.filter(c => !isolatedSet.has(c));
+    const osCount = Math.max(2, Math.min(3, nonIsolatedNet.length));
 
-    for (let i = 0; i < osCount && i < netNumaCores.length; i++) {
-        const core = netNumaCores[i];
-        proposedOs.push(core);
-        assigned.add(core);
+    for (let i = 0; i < osCount && i < nonIsolatedNet.length; i++) {
+        proposedOs.push(nonIsolatedNet[i]);
+        assigned.add(nonIsolatedNet[i]);
     }
     changes.push(`### Physical / OS Layer ###`);
-    changes.push(`System (OS): [${proposedOs.join(', ')}]`);
+    changes.push(`System (OS): [${proposedOs.join(', ')}] (non-isolated)`);
 
     // ===== STEP 2: Shared IRQ =====
-    // IRQ is shared: 1 core per NUMA that handles network traffic
-    // Typically: core 8 for NUMA 0, core 16+ for NUMA 1 (first core of other NUMA block)
+    // IRQ: min 2 cores, distributed across L3, on isolated network NUMA cores
+    const irqNeeded = Math.max(2, Math.ceil((analysis.irq.needed || 2)));
     const irqCores: number[] = [];
 
-    // Pick first available core in network NUMA (after OS) that's divisible by 8 or just next
-    const netAfterOs = netNumaCores.filter(c => !assigned.has(c));
-    const irqNet = netAfterOs.find(c => c % 8 === 0) || netAfterOs[netAfterOs.length - 1];
-    if (irqNet !== undefined) {
-        irqCores.push(irqNet);
-        assigned.add(irqNet);
-    }
+    // Take from different L3 groups
+    let irqTaken = 0;
+    for (const l3Key of netL3Keys) {
+        if (irqTaken >= irqNeeded) break;
+        const l3Cores = (l3Groups[l3Key] || []).filter(c =>
+            isolatedSet.has(c) && !assigned.has(c)
+        ).sort((a, b) => a - b);
 
-    // For other NUMA, pick first core
-    if (otherNumaCores.length > 0) {
-        const irqOther = otherNumaCores[0];
-        irqCores.push(irqOther);
-        assigned.add(irqOther);
+        if (l3Cores.length > 0) {
+            const c = l3Cores[0];
+            irqCores.push(c);
+            assigned.add(c);
+            irqTaken++;
+        }
     }
 
     sharedIrq.push(...irqCores);
-    changes.push(`IRQ (Net): [${irqCores.join(', ')}]`);
+    changes.push(`IRQ (Net): [${irqCores.join(', ')}] (${irqCores.length} cores, shared)`);
 
     // ===== STEP 3: Per-instance allocation =====
     const instanceNames = Object.keys(analysis.instances);
     const numInstances = instanceNames.length;
 
-    // Available network NUMA cores (after OS and IRQ)
-    let availableNetCores = netNumaCores.filter(c => !assigned.has(c)).sort((a, b) => a - b);
+    // Available isolated network NUMA cores (after OS and IRQ)
+    let availableNetCores = netNumaCores.filter(c =>
+        isolatedSet.has(c) && !assigned.has(c)
+    ).sort((a, b) => a - b);
     let netCoreIdx = 0;
 
-    // Available other NUMA cores (for robot pool node1)
-    let availableOtherCores = otherNumaCores.filter(c => !assigned.has(c)).sort((a, b) => a - b);
-    let otherCoreIdx = 0;
-
-    const takeNetCores = (n: number): number[] => {
-        const taken: number[] = [];
-        while (taken.length < n && netCoreIdx < availableNetCores.length) {
+    const takeNetCore = (): number | null => {
+        while (netCoreIdx < availableNetCores.length) {
             const c = availableNetCores[netCoreIdx++];
             if (!assigned.has(c)) {
-                taken.push(c);
                 assigned.add(c);
+                return c;
             }
         }
-        return taken;
-    };
-
-    const takeOtherCores = (n: number): number[] => {
-        const taken: number[] = [];
-        while (taken.length < n && otherCoreIdx < availableOtherCores.length) {
-            const c = availableOtherCores[otherCoreIdx++];
-            if (!assigned.has(c)) {
-                taken.push(c);
-                assigned.add(c);
-            }
-        }
-        return taken;
+        return null;
     };
 
     instanceNames.forEach(instName => {
         const current = analysis.instances[instName].current;
 
-        // Determine gateway count from current or default to 3-4
-        const gwCount = Math.max(3, current.gateways);
-
-        // Robot pools: ~4 on NUMA 0, rest on NUMA 1
-        const robotsNode0 = Math.min(4, Math.floor(availableNetCores.length / numInstances / 2));
-        const robotsNode1 = Math.max(8, 12 - robotsNode0); // Target ~12 total robots
-
         changes.push(`### Instance: ${instName} ###`);
 
-        // Allocate on NETWORK NUMA
-        const udp = takeNetCores(1);
-        const ar = takeNetCores(1); // AR shares with RF and Formula
-        const gateways = takeNetCores(gwCount);
-        const trash = takeNetCores(1); // Trash shares with ClickHouse
-        const robotPool0 = takeNetCores(robotsNode0);
+        // Service cores on network NUMA
+        // Trash+RF+Click share 1 core
+        const trashCore = takeNetCore();
+        const trash = trashCore !== null ? [trashCore] : [];
+        const rf = trash.slice(); // RF shares with Trash
+        const clickhouse = trash.slice(); // ClickHouse shares with Trash
 
-        // Allocate on OTHER NUMA
-        const robotPool1 = takeOtherCores(robotsNode1);
+        // AR+Formula share 1 core (NOT on Trash!)
+        const arCore = takeNetCore();
+        const ar = arCore !== null ? [arCore] : [];
+        const formula = ar.slice(); // Formula shares with AR
+
+        // UDP: separate core
+        const udpCore = takeNetCore();
+        const udp = udpCore !== null ? [udpCore] : [];
+
+        // Gateways: +20% margin
+        const gwNeeded = Math.max(3, Math.ceil(current.gateways * 1.2));
+        const gateways: number[] = [];
+        for (let i = 0; i < gwNeeded; i++) {
+            const c = takeNetCore();
+            if (c !== null) gateways.push(c);
+        }
+
+        // Robot pools: take from other NUMAs
+        const robotPoolNode0: number[] = [];
+        const robotPoolNode1: number[] = [];
+
+        // Pool 1: from first other NUMA
+        if (otherNumaNodes.length >= 1) {
+            const numa1Cores = getCoresByNuma(otherNumaNodes[0])
+                .filter(c => isolatedSet.has(c) && !assigned.has(c));
+            const pool1Count = Math.floor(numa1Cores.length / numInstances);
+
+            for (let i = 0; i < pool1Count && numa1Cores.length > 0; i++) {
+                const idx = i + (instanceNames.indexOf(instName) * pool1Count);
+                if (idx < numa1Cores.length && !assigned.has(numa1Cores[idx])) {
+                    robotPoolNode0.push(numa1Cores[idx]);
+                    assigned.add(numa1Cores[idx]);
+                }
+            }
+        }
+
+        // Pool 2: from second other NUMA (or remaining of first)
+        if (otherNumaNodes.length >= 2) {
+            const numa2Cores = getCoresByNuma(otherNumaNodes[1])
+                .filter(c => isolatedSet.has(c) && !assigned.has(c));
+            const pool2Count = Math.floor(numa2Cores.length / numInstances);
+
+            for (let i = 0; i < pool2Count && numa2Cores.length > 0; i++) {
+                const idx = i + (instanceNames.indexOf(instName) * pool2Count);
+                if (idx < numa2Cores.length && !assigned.has(numa2Cores[idx])) {
+                    robotPoolNode1.push(numa2Cores[idx]);
+                    assigned.add(numa2Cores[idx]);
+                }
+            }
+        } else if (otherNumaNodes.length >= 1) {
+            // Single other NUMA - split remaining cores
+            const numaRemaining = getCoresByNuma(otherNumaNodes[0])
+                .filter(c => isolatedSet.has(c) && !assigned.has(c));
+            const splitPoint = Math.floor(numaRemaining.length / 2 / numInstances);
+
+            for (let i = 0; i < splitPoint; i++) {
+                const idx = i + (instanceNames.indexOf(instName) * splitPoint);
+                if (idx < numaRemaining.length && !assigned.has(numaRemaining[idx])) {
+                    robotPoolNode1.push(numaRemaining[idx]);
+                    assigned.add(numaRemaining[idx]);
+                }
+            }
+        }
 
         const instAlloc = {
             trash,
             udp,
             ar,
-            rf: ar.length > 0 ? [ar[0]] : [], // RF shares with AR
+            rf,
             gateways,
-            robotPoolNode0: robotPool0,
-            robotPoolNode1: robotPool1,
-            clickhouse: trash.length > 0 ? [trash[0]] : [], // ClickHouse shares with Trash
-            formula: ar.length > 0 ? [ar[0]] : [] // Formula shares with AR
+            robotPoolNode0,
+            robotPoolNode1,
+            clickhouse,
+            formula
         };
 
         instanceAllocations[instName] = instAlloc;
 
         // Log in user's preferred format
-        changes.push(`Robot_Pool_Node0: [${robotPool0.join(', ')}]`);
-        changes.push(`Robot_Pool_Node1: [${robotPool1.join(', ')}]`);
+        changes.push(`Trash+RF+Click: [${trash.join(', ')}] (shared)`);
+        changes.push(`AR+Formula: [${ar.join(', ')}] (shared, NOT Trash!)`);
         changes.push(`UDP: [${udp.join(', ')}]`);
-        changes.push(`AR: [${ar.join(', ')}]`);
-        changes.push(`Gateway: [${gateways.join(', ')}]`);
-        changes.push(`RF (Remote): [${instAlloc.rf.join(', ')}]`);
-        changes.push(`Clickhouse: [${instAlloc.clickhouse.join(', ')}]`);
-        changes.push(`Formula: [${instAlloc.formula.join(', ')}]`);
-        changes.push(`Trash: [${trash.join(', ')}]`);
+        changes.push(`Gateway: [${gateways.join(', ')}] (${gateways.length} cores)`);
+        changes.push(`Robot_Pool_0: [${robotPoolNode0.join(', ')}]`);
+        changes.push(`Robot_Pool_1: [${robotPoolNode1.join(', ')}]`);
     });
 
-    // ===== STEP 4: All assigned cores (except OS) are isolated =====
+    // ===== STEP 4: All isolated cores (except OS) =====
     allCores.forEach(c => {
-        if (!proposedOs.includes(c)) {
+        if (isolatedSet.has(c) && !proposedOs.includes(c)) {
             proposedIsolated.push(c);
         }
     });
@@ -788,6 +829,7 @@ export function generateRedistributionPlan(
         changes
     };
 }
+
 
 
 
