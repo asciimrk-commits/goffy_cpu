@@ -339,6 +339,28 @@ input:focus {
   /* Slight contrast against card bg */
   border-radius: 12px;
   padding: 16px;
+  flex: 1;
+  /* Allow sockets to share space if we change flex-direction */
+}
+
+.numa-section {
+  margin-bottom: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.numa-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.cmp-cores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .core {
@@ -347,6 +369,11 @@ input:focus {
   border-radius: 6px;
   font-size: 11px;
   border: 2px solid transparent;
+  display: flex;
+  /* Fix vertical stacking */
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
 }
 
 /* Fix Compare Layout */
