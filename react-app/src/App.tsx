@@ -57,7 +57,7 @@ function App() {
             {serverName && (
               <div className="header-info">
                 <span className="server-name">{serverName}</span>
-                {date && <span className="server-date">{date}</span>}
+                {date && <span className="server-date">{date.replace('T', ' ').split('+')[0]}</span>}
               </div>
             )}
             <button onClick={toggleTheme} className="theme-toggle" title="Toggle Theme">

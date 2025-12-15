@@ -26,27 +26,26 @@ function ComparePanel({ config }: { config: ConfigData | null }) {
     <div className="compare-panel">
       <h4>{config.serverName}</h4>
       {Object.entries(config.geometry).map(([socketId, numaData]) => (
-        <div key={socketId} className="cmp-socket">
-          <div className="cmp-socket-header">Socket {socketId}</div>
+        <div key={socketId} className="socket-card">
+          <div className="socket-header">Socket {socketId}</div>
           {Object.entries(numaData).map(([numaId, l3Data]) => (
-            <div key={numaId} className="cmp-numa">
-              <div className="cmp-numa-header">NUMA {numaId}</div>
+            <div key={numaId} className="numa-section" style={{ marginBottom: 0 }}>
+              <div className="numa-header">NUMA {numaId}</div>
               <div className="cmp-cores">
                 {Object.values(l3Data).flat().map(cpuId => {
                   const roles = config.instances.Physical[String(cpuId)] || [];
                   const primaryRole = roles[0];
-                  const color = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#1e293b';
+                  // Use same logic for color
+                  const color = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#334155';
                   const isIsolated = isolatedSet.has(cpuId);
                   const hasMultipleRoles = roles.length > 1;
 
                   let background = color;
+                  // Gradient for multiple
                   if (hasMultipleRoles) {
                     const colors = roles.slice(0, 3).map(r => ROLES[r]?.color || '#64748b');
-                    if (colors.length === 2) {
-                      background = `linear-gradient(135deg, ${colors[0]} 50%, ${colors[1]} 50%)`;
-                    } else if (colors.length >= 3) {
-                      background = `linear-gradient(135deg, ${colors[0]} 33%, ${colors[1]} 33% 66%, ${colors[2]} 66%)`;
-                    }
+                    if (colors.length === 2) background = `linear-gradient(135deg, ${colors[0]} 50%, ${colors[1]} 50%)`;
+                    else if (colors.length >= 3) background = `linear-gradient(135deg, ${colors[0]} 33%, ${colors[1]} 33% 66%, ${colors[2]} 66%)`;
                   }
 
                   return (
@@ -57,13 +56,15 @@ function ComparePanel({ config }: { config: ConfigData | null }) {
                       isIsolated={isIsolated}
                     >
                       <div
-                        className={`cmp-core ${hasMultipleRoles ? 'multi-role' : ''}`}
+                        className={`core ${hasMultipleRoles ? 'multi-role' : ''}`}
                         style={{
                           background,
-                          borderColor: isIsolated ? '#606080' : 'transparent',
+                          borderColor: isIsolated ? '#fff' : 'transparent',
+                          color: '#fff',
+                          opacity: roles.length > 0 || isIsolated ? 1 : 0.3
                         }}
                       >
-                        <span className="core-id">{cpuId}</span>
+                        {cpuId}
                       </div>
                     </CoreTooltip>
                   );

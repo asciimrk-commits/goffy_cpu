@@ -11,28 +11,6 @@ interface Recommendation {
     instance: string;
 }
 
-// Fixed Color Palette matching HFT Rules
-const COLORS: Record<string, string> = {
-    'sys_os': '#64748b', // Slate
-    'net_irq': '#e63946',
-    'udp': '#f4a261',
-    'trash': '#8b6914',
-    'gateway': '#ffd60a',
-    'isolated_robots': '#10b981',
-    'pool1': '#3b82f6',
-    'pool2': '#6366f1',
-    'robot_default': '#2ec4b6',
-    'ar': '#a855f7',
-    'rf': '#22d3ee',
-    'formula': '#94a3b8',
-    'click': '#4f46e5'
-};
-
-const INSTANCE_COLORS: Record<string, string> = {
-    'OS': '#64748b',
-    'Physical': '#64748b',
-};
-
 // Colors for detected instances
 const PREDEFINED_COLORS = [
     '#3b82f6', // Blue
@@ -43,22 +21,22 @@ const PREDEFINED_COLORS = [
     '#06b6d4', // Cyan
 ];
 
+const SHARED_COLOR = '#64748b'; // Slate for OS/IRQ
+
 export function AutoOptimize() {
     const {
         geometry,
-        isolatedCores,
         instances,
         netNumaNodes,
         coreNumaMap,
         coreLoads,
         setInstances,
-        l3Groups
     } = useAppStore();
 
     const [result, setResult] = useState<string | null>(null);
     const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
     const [instanceOwnership, setInstanceOwnership] = useState<Record<string, Set<number>>>({});
-    const [instColors, setInstColors] = useState<Record<string, string>>(INSTANCE_COLORS);
+    const [instColors, setInstColors] = useState<Record<string, string>>({});
     const [proposedAllocation, setProposedAllocation] = useState<Record<string, Record<string, string[]>> | null>(null);
     const [hoveredInstance, setHoveredInstance] = useState<string | null>(null);
 
@@ -69,319 +47,234 @@ export function AutoOptimize() {
         }
 
         const netNuma = String(netNumaNodes.length > 0 ? netNumaNodes[0] : 0);
-        const isoSet = new Set(isolatedCores.map(String));
+        // const isoSet = new Set(isolatedCores.map(String)); // Unused for now
+        const recs: Recommendation[] = [];
 
-        // === Logic from hft-rules.js ===
+        // 1. Detect Instances
+        const detectedInstances: string[] = [];
+        Object.keys(instances).forEach(k => {
+            if (k !== 'Physical' && k !== 'OS') detectedInstances.push(k);
+        });
+        if (detectedInstances.length === 0) detectedInstances.push('Total'); // Default if no instances
+        detectedInstances.sort();
 
-        // 1. Analyze Topology
+        // Assign Colors
+        const mapColors: Record<string, string> = { 'OS': SHARED_COLOR, 'Shared': SHARED_COLOR };
+        detectedInstances.forEach((inst, idx) => {
+            mapColors[inst] = PREDEFINED_COLORS[idx % PREDEFINED_COLORS.length];
+        });
+        setInstColors(mapColors);
+
+        // 2. Resource Pools (Global)
         const byNuma: Record<string, string[]> = {};
-        const byNumaL3: Record<string, Record<string, string[]>> = {};
-
         Object.entries(coreNumaMap).forEach(([cpu, numa]) => {
             const n = String(numa);
             if (!byNuma[n]) byNuma[n] = [];
             byNuma[n].push(cpu);
         });
-        Object.entries(l3Groups || {}).forEach(([l3, cores]) => {
-            if (cores.length === 0) return;
-            const cpu = String(cores[0]);
-            const numa = String(coreNumaMap[cpu] || 0);
-            if (!byNumaL3[numa]) byNumaL3[numa] = {};
-            byNumaL3[numa][l3] = cores.map(String);
-        });
         Object.values(byNuma).forEach(c => c.sort((a, b) => parseInt(a) - parseInt(b)));
 
-        const recs: Recommendation[] = [];
-        const proposed: Record<string, string[]> = {};
-        const ownership: Record<string, Set<number>> = {};
-        const newInstColors = { ...INSTANCE_COLORS };
-        const proposedByInstance: Record<string, Record<string, string[]>> = {};
+        // Net Pool (Preferred for OS, IRQ, Gateways, Flash, UDP)
+        // Compute Pool (Preferred for Robots)
+        // We track used cores to ensure segregation
+        const usedCores = new Set<string>();
 
-        const assignRole = (cpu: string, role: string, inst: string) => {
-            if (!proposed[cpu]) proposed[cpu] = [];
-            if (!proposed[cpu].includes(role)) proposed[cpu].push(role);
+        const popCore = (pool: string[], count: number): string[] => {
+            const res: string[] = [];
+            // Try to find isolated/non-isolated based on preference
+            // Logic: Sort pool by isolation match?
+            // Actually user logic: "Isolated robots" might prefer isolated.
+            // But strict "Net vs Other" is simpler.
 
-            if (!ownership[inst]) ownership[inst] = new Set();
-            ownership[inst].add(parseInt(cpu));
+            // Filter out used
+            const available = pool.filter(c => !usedCores.has(c));
 
-            if (!proposedByInstance[inst]) proposedByInstance[inst] = {};
-            if (!proposedByInstance[inst][cpu]) proposedByInstance[inst][cpu] = [];
-            if (!proposedByInstance[inst][cpu].includes(role)) proposedByInstance[inst][cpu].push(role);
+            for (let i = 0; i < count; i++) {
+                if (available.length > 0) {
+                    const c = available.shift()!;
+                    res.push(c);
+                    usedCores.add(c);
+                }
+            }
+            return res;
         };
-        const isAssigned = (cpu: string) => (proposed[cpu]?.length || 0) > 0;
 
-        // Helpers
-        const getTotalLoad = (cores: string[]) => !cores?.length ? 0 : cores.reduce((s, c) => s + (coreLoads[parseInt(c)] || 0), 0);
-        const calcNeeded = (cores: string[], target = 25) => {
-            const t = getTotalLoad(cores);
-            return t === 0 ? (cores?.length || 1) : Math.max(1, Math.ceil(t / target));
-        };
-
-        // Detect Instances (Legacy+New Hybrid)
-        // In this version (Global Optimization), we treat "Physical" as the target for the User's Rules.
-        // But we DO verify specific instances if provided.
-        // The user says "Auto-Configurator distributed cores incorrectly", implying global allocation is paramount.
-        // We will assign to "Physical" instance mostly, OR if inputs have names, map to them.
-
-        // Let's stick to assigning "roles" globally (like hft-rules.js) but tagging them with an Instance Name if reasonable.
-        // HFT Rules assumes ONE set of roles for the server.
-        // "DETECTED INSTANCES" might be multiple.
-
-        // Logic: Iterate DETECTED instances and run the HFT Rules for EACH?
-        // OR Run Global HFT Rules and split?
-        // The user complained about "redistributing cores".
-        // Let's assume SINGLE TENANT OPTIMIZATION for now (Physical), or per-instance?
-        // hft-rules.js processes `s.instances.Physical`. It seems single-tenant focused.
-
-        // However, standard `AutoOptimize.tsx` supported multiple instances.
-        // Let's use PREVIOUS LOGIC (v8) which was "Port hft-rules.js".
-        // BUT v9 was "Per Instance".
-
-        // If the user says "return the first version", and "hft-rules.js" is the reference...
-        // I will implement "Per Instance" loop but using "hft-rules" logic inside?
-        // No, hft-rules uses "Net NUMA" global concept.
-
-        // Let's detect instances and run "hft-rules-like" allocation for EACH instance,
-        // sharing the Global Resources (Net NUMA) round-robin.
-
-        const detectedInstances: string[] = [];
-
-        // Populate detectedInstances
-        Object.keys(instances).forEach(k => {
-            if (k !== 'Physical' && k !== 'OS') detectedInstances.push(k);
-        });
-        if (detectedInstances.length === 0) detectedInstances.push('Physical');
-        detectedInstances.sort();
-
-        // Assign colors
-        detectedInstances.forEach((inst, idx) => {
-            if (!newInstColors[inst]) {
-                newInstColors[inst] = PREDEFINED_COLORS[idx % PREDEFINED_COLORS.length];
-            }
+        const netPool = byNuma[netNuma] || [];
+        const computePool: string[] = [];
+        Object.keys(byNuma).forEach(n => {
+            if (n !== netNuma) computePool.push(...byNuma[n]);
         });
 
-        // 2. Global Resources Setup
-        const netNumaCores = byNuma[netNuma] || [];
-        const netL3Pools = byNumaL3[netNuma] || {};
-        const netL3Keys = Object.keys(netL3Pools).sort((a, b) => (parseInt(a.split('-').pop()!) || 0) - (parseInt(b.split('-').pop()!) || 0));
-
-        // Shared OS Allocation (First N cores of Net NUMA)
-        // hft-rules: Check input 'sys_os'. If not, use first 2 net numa.
-        let osCores = netNumaCores.filter(c => !isoSet.has(c));
-        if (osCores.length === 0) {
-            // All isolated? Force take first 2
-            osCores = netNumaCores.slice(0, 2);
-            if (osCores.length === 0) osCores = ['0', '1'];
-        }
-
-        // Calculate needed OS
-        const osNeededRaw = Math.ceil(getTotalLoad(osCores) / 25);
-        const osNeeded = Math.min(Math.max(2, osNeededRaw), 4);
-
-        const assignedOsCores = osCores.slice(0, osNeeded);
-        assignedOsCores.forEach(c => assignRole(c, 'sys_os', 'OS'));
-        recs.push({
-            title: 'OS',
-            cores: assignedOsCores,
-            description: `${assignedOsCores.length} cores`,
-            role: 'sys_os',
-            rationale: `Global System`,
-            instance: 'OS'
-        });
-
-        // 3. Round-Robin / Priority Allocation for Instances
-        // We have:
-        // - Service L3 (for Trash/AR)
-        // - Work L3s (for GW/IRQ)
-        // - Robot NUMAs (Other)
-
-        // Identify Service L3 (the one intersected by OS or first)
-        let serviceL3 = netL3Keys.find(l3 => netL3Pools[l3].some(c => assignedOsCores.includes(c))) || netL3Keys[0];
-        let workL3Keys = netL3Keys.filter(k => k !== serviceL3);
-        if (workL3Keys.length === 0 && netL3Keys.length > 0) workL3Keys = [serviceL3];
-
-        const servicePool = (netL3Pools[serviceL3] || []).filter(c => !isAssigned(c));
-        // Sort service pool by isolation? Preferred isolated.
-        servicePool.sort((a) => (isoSet.has(a) ? -1 : 1));
-
-        // Global Pools
-        const workPools: Record<string, string[]> = {};
-        workL3Keys.forEach(k => {
-            workPools[k] = (netL3Pools[k] || []).filter(c => !isAssigned(c));
-        });
-
-        // Per-Instance Demand Calc
-        detectedInstances.forEach(instName => {
-            const myCpuMap = instances[instName] || {};
-            // Gather roles
-            const myRoles: Record<string, string[]> = {};
-            Object.entries(myCpuMap).forEach(([cpu, roles]) => {
-                roles.forEach(r => {
-                    if (!myRoles[r]) myRoles[r] = [];
-                    myRoles[r].push(cpu);
-                });
-            });
-
-            // Demands
-            const hasAr = (myRoles['ar']?.length || 0) > 0 || (myRoles['formula']?.length || 0) > 0;
-            const gwRaw = myRoles['gateway'] || [];
-            const gwNeeded = calcNeeded(gwRaw, 25) + 2; // Buffer
-            const irqNeeded = Math.ceil(gwNeeded / 4) || 1;
-
-            // Robot Demand
-            // Count all robot roles
-            const robotRoles = ['isolated_robots', 'pool1', 'pool2', 'robot_default'];
-            let robotCoresRaw: string[] = [];
-            robotRoles.forEach(r => {
-                if (myRoles[r]) robotCoresRaw.push(...myRoles[r]);
-            });
-            const robotNeeded = Math.max(1, calcNeeded(robotCoresRaw, 25));
-
-            // --- Allocation ---
-
-            // 1. Service Cores (Trash, UDP, AR)
-            // Try Service Pool first
-            const popService = (cnt: number) => {
-                const res: string[] = [];
-                for (let i = 0; i < cnt; i++) {
-                    if (servicePool.length > 0) res.push(servicePool.shift()!);
-                    else {
-                        // Fallback to work pools?
-                        for (const k of workL3Keys) {
-                            if (workPools[k]?.length > 0) {
-                                res.push(workPools[k].shift()!);
-                                break;
-                            }
-                        }
-                    }
-                }
-                return res;
-            };
-
-            const trashCores = popService(1);
-            trashCores.forEach(c => {
-                assignRole(c, 'trash', instName);
-                assignRole(c, 'rf', instName);
-                assignRole(c, 'click', instName);
-            });
-            recs.push({ title: 'Trash+RF', cores: trashCores, description: '1 core', role: 'trash', instance: instName });
-
-            const udpCores = popService(1);
-            udpCores.forEach(c => assignRole(c, 'udp', instName));
-            recs.push({ title: 'UDP', cores: udpCores, description: '1 core', role: 'udp', instance: instName });
-
-            if (hasAr) {
-                const arCores = popService(1);
-                arCores.forEach(c => {
-                    assignRole(c, 'ar', instName);
-                    assignRole(c, 'formula', instName);
-                });
-                recs.push({ title: 'AR+Formula', cores: arCores, description: '1 core', role: 'ar', instance: instName });
-            }
-
-            // 2. Gateway + IRQ
-            // Round Robin across Work L3s to spread load?
-            // "Strive to flush one L3 pool... IRQ/GW use non-service pools"
-
-            let currentL3Idx = 0;
-            const popWork = (cnt: number) => {
-                const res: string[] = [];
-                for (let i = 0; i < cnt; i++) {
-                    // Try current L3, then next
-                    let found = false;
-                    for (let j = 0; j < workL3Keys.length; j++) {
-                        const l3 = workL3Keys[(currentL3Idx + j) % workL3Keys.length];
-                        if (workPools[l3]?.length > 0) {
-                            res.push(workPools[l3].shift()!);
-                            currentL3Idx = (currentL3Idx + j + 1) % workL3Keys.length; // Rotate
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        // Use service pool fallback?
-                        if (servicePool.length > 0) res.push(servicePool.shift()!);
-                    }
-                }
-                return res;
-            };
-
-            const irqCores = popWork(irqNeeded);
-            irqCores.forEach(c => assignRole(c, 'net_irq', instName));
-            recs.push({ title: 'IRQ', cores: irqCores, description: `${irqCores.length} cores`, role: 'net_irq', instance: instName });
-
-            const gwCores = popWork(gwNeeded);
-            gwCores.forEach(c => assignRole(c, 'gateway', instName));
-            recs.push({ title: 'Gateways', cores: gwCores, description: `${gwCores.length} cores`, role: 'gateway', instance: instName });
-
-            // 3. Robots (Compute NUMA)
-            // Available NUMAs excluding Net
-            const computeNumas = Object.keys(byNuma).filter(n => n !== netNuma).sort((a, b) => parseInt(a) - parseInt(b));
-
-            // Build pool of all compute cores
-            const computePool: string[] = [];
-            computeNumas.forEach(n => {
-                const cores = byNuma[n].filter(c => !isAssigned(c));
-                computePool.push(...cores);
-            });
-            // If empty, spill to Net
-            if (computePool.length === 0) {
-                // Remaining Net
-                workL3Keys.forEach(k => {
-                    if (workPools[k]) computePool.push(...workPools[k]);
-                });
-                if (servicePool.length > 0) computePool.push(...servicePool);
-            }
-
-            const robotsTaken: string[] = [];
-            for (let i = 0; i < robotNeeded; i++) {
-                if (computePool.length > 0) robotsTaken.push(computePool.shift()!);
-            }
-
-            // Fill remainder if only 1 instance? 
-            // "Robots target 25-30%". 
-            // If we have single instance, give ALL remaining?
-            if (detectedInstances.length === 1 && computePool.length > 0) {
-                robotsTaken.push(...computePool);
-            }
-
-            if (robotsTaken.length > 0) {
-                // Tier Logic
-                // If >=4, allocate 4 to Isolated
-                const isoCount = robotsTaken.length >= 4 ? 4 : 0;
-                const iso = robotsTaken.slice(0, isoCount);
-                const rest = robotsTaken.slice(isoCount);
-
-                if (iso.length > 0) {
-                    iso.forEach(c => assignRole(c, 'isolated_robots', instName));
-                    recs.push({ title: 'Isolated Robots', cores: iso, description: `${iso.length} cores`, role: 'isolated_robots', instance: instName, rationale: 'Tier 1' });
-                }
-                if (rest.length > 0) {
-                    rest.forEach(c => assignRole(c, 'pool1', instName)); // Just pool1 for simplicity or split?
-                    recs.push({ title: 'Robot Pool', cores: rest, description: `${rest.length} cores`, role: 'pool1', instance: instName, rationale: 'Tier 2' });
-                }
+        // Helper to get total load of a role across all instances
+        const getLoad = (role: string, inst?: string) => {
+            let cores: string[] = [];
+            if (inst) {
+                cores = instances[inst]?.[role] || [];
             } else {
-                recs.push({ title: 'Robots', cores: [], description: '0 cores', role: 'robot_default', instance: instName, warning: 'No cores available!' });
+                // Global search
+                detectedInstances.forEach(i => {
+                    const c = instances[i]?.[role] || [];
+                    cores.push(...c);
+                });
+                // Also check Physical?
+                if (instances.Physical?.[role]) cores.push(...instances.Physical[role]);
             }
+            if (cores.length === 0) return 0;
+            const total = cores.reduce((acc, c) => acc + (coreLoads[parseInt(c)] || 0), 0);
+            return total;
+        };
 
+        const calcNeeded = (load: number, target = 25) => {
+            if (load === 0) return 0; // If 0 load, maybe 1 core min?
+            // Logic: "assess load ... target 20-30%"
+            return Math.max(1, Math.ceil(load / target));
+        };
+
+        // --- SHARED RESOURCES (OS, IRQ) ---
+
+        // OS
+        const osLoad = getLoad('sys_os');
+        // If current OS load is 0 (missing data), assume minimal safety (2 cores)
+        const osNeeded = osLoad === 0 ? 2 : calcNeeded(osLoad, 25);
+        const osCores = popCore(netPool, Math.min(osNeeded, 4)); // Cap at 4
+
+        recs.push({
+            title: 'Shared OS',
+            instance: 'Global',
+            role: 'sys_os',
+            cores: osCores,
+            description: `${osCores.length} cores`,
+            rationale: `Load: ${osLoad.toFixed(0)}%`
         });
 
-        setInstanceOwnership(ownership);
+        // IRQ
+        // Count TOTAL gateways across all instances to determine IRQ count
+        let totalGateways = 0;
+        detectedInstances.forEach(i => {
+            totalGateways += (instances[i]?.['gateway']?.length || 0);
+        });
+        // Logic: 1-4 gw -> 1 irq. 5-8 -> 2.
+        const irqNeeded = Math.ceil(Math.max(1, totalGateways) / 4);
+        const irqCores = popCore(netPool, irqNeeded);
+
+        recs.push({
+            title: 'Shared IRQ',
+            instance: 'Global',
+            role: 'net_irq',
+            cores: irqCores,
+            description: `${irqCores.length} cores`,
+            rationale: `Gateways: ${totalGateways}`
+        });
+
+        // Mark SHARED ownership
+        const ownership: Record<string, Set<number>> = {};
+        const proposedByInst: Record<string, Record<string, string[]>> = {};
+
+        const register = (inst: string, role: string, cores: string[]) => {
+            if (!proposedByInst[inst]) proposedByInst[inst] = {};
+            cores.forEach(c => {
+                if (!proposedByInst[inst][c]) proposedByInst[inst][c] = [];
+                proposedByInst[inst][c].push(role);
+
+                if (!ownership[inst]) ownership[inst] = new Set();
+                ownership[inst].add(parseInt(c));
+            });
+        };
+
+        // Register Shared
+        // We register them to 'Global' or to ALL instances?
+        // User: "used by N services simultaneously".
+        // Let's register to ALL detected instances so they show up.
+        detectedInstances.forEach(inst => {
+            register(inst, 'sys_os', osCores);
+            register(inst, 'net_irq', irqCores);
+        });
+
+        // --- SEGREGATED RESOURCES (Per Instance) ---
+
+        detectedInstances.forEach(inst => {
+            // Check existence in input
+            const myRoles = instances[inst] || {};
+            const hasRf = (myRoles['rf']?.length || 0) > 0;
+            const hasClick = (myRoles['click']?.length || 0) > 0;
+            // The user said: "Trash, AR-RF, UDP mandatory".
+
+            // 1. Network Services (Net Pool)
+            const trashCores = popCore(netPool, 1);
+            register(inst, 'trash', trashCores);
+            if (hasClick) register(inst, 'click', trashCores); // Co-locate?
+            recs.push({ title: 'Trash', instance: inst, role: 'trash', cores: trashCores, description: '1 core' });
+
+            const udpCores = popCore(netPool, 1);
+            register(inst, 'udp', udpCores);
+            recs.push({ title: 'UDP', instance: inst, role: 'udp', cores: udpCores, description: '1 core' });
+
+            // AR/RF/Formula
+            const arCores = popCore(netPool, 1); // 1 core for AR+RF
+            register(inst, 'ar', arCores);
+            if (hasRf) register(inst, 'rf', arCores);
+            if (myRoles['formula']) register(inst, 'formula', arCores);
+            recs.push({ title: 'AR/RF', instance: inst, role: 'ar', cores: arCores, description: '1 core' });
+
+            // 2. Gateways (Net Pool)
+            const gwLoad = getLoad('gateway', inst);
+            const gwNeeded = calcNeeded(gwLoad, 25);
+            // The user previously said "+2 buffer", but now "target 20-30%".
+            // "math calculate how many necessary considering current load and striving to 20-30%".
+            // If we use calcNeeded with 25%, that satisfies the requirement. No explicit buffer mention in NEW prompt.
+            const gwCores = popCore(netPool, gwNeeded);
+            register(inst, 'gateway', gwCores);
+            recs.push({ title: 'Gateways', instance: inst, role: 'gateway', cores: gwCores, description: `${gwCores.length} cores`, rationale: `Load ${gwLoad.toFixed(0)}%` });
+
+            // 3. Robots (Compute Pool)
+            // Use compute pool first, spill to Net if needed
+            const robotLoad = getLoad('robot_default', inst)
+                + getLoad('isolated_robots', inst)
+                + getLoad('pool1', inst)
+                + getLoad('pool2', inst);
+
+            const robotNeeded = calcNeeded(robotLoad, 25);
+
+            // Try Compute Pool
+            let robotCores = popCore(computePool, robotNeeded);
+            // Spill to Net if needed
+            if (robotCores.length < robotNeeded) {
+                const needed = robotNeeded - robotCores.length;
+                const extra = popCore(netPool, needed);
+                robotCores = [...robotCores, ...extra];
+            }
+
+            // Assign generic 'robot_default' or split?
+            // If input had 'isolated', preserve it? 
+            // User: "evaluate load on EACH pool ... (pool gates, pool robots...)".
+            // This implies we treat all robots as one big pool for calculation, OR check specific pools?
+            // "Optional: Clickhouse, Isolated, Formula... others mandatory"
+            // Let's assign to 'robot_default' generally.
+            register(inst, 'robot_default', robotCores);
+            recs.push({ title: 'Robots', instance: inst, role: 'robot_default', cores: robotCores, description: `${robotCores.length} cores`, rationale: `Load ${robotLoad.toFixed(0)}%` });
+        });
+
         setRecommendations(recs);
-        setProposedAllocation(proposedByInstance);
-        setInstColors(newInstColors);
-        setResult('Optimization Complete (Legacy Rules v4.5)');
+        setProposedAllocation(proposedByInst);
+        setInstanceOwnership(ownership);
+        setResult('Optimization Complete: V2 Demand-Based');
     };
 
     const applyRecommendations = () => {
         if (!proposedAllocation) return;
-        const config: any = { ...proposedAllocation };
-        if (!config.Physical) config.Physical = {};
-        setInstances(config);
-        setResult('Applied!');
+        // Merge shared logic?
+        // proposedAllocation keys are Instances.
+        // We need to flatten to single map OR keep multi-instance structure if App supports it.
+        // 'setInstances' takes InstanceConfig.
+        // We need to make sure we don't overwrite if we are merging?
+        // Actually, the proposedAllocation IS the full state per instance.
+        // Just merge 'sys_os' and 'net_irq' carefully? 
+        // My 'register' function added them to EACH instance. So it is fine.
+        setInstances(proposedAllocation as any);
+        setResult('Applied Config!');
     };
 
-    // Render Logic (Unified Map)
+    // Render Unified Map with Segregation
     const renderUnifiedMap = () => {
         return (
             <div className="topology-grid">
@@ -400,58 +293,64 @@ export function AutoOptimize() {
                                     </div>
                                     <div className="cmp-cores">
                                         {Object.entries(l3Data).flatMap(([, cores]) => cores).map(cpuId => {
-                                            let owner = 'Free';
-                                            let color = '#334155';
-                                            let coreRoles: string[] = [];
+                                            // Determine Owner
+                                            // Check all instances
+                                            const owners: string[] = [];
+                                            const roles: string[] = [];
 
-                                            // Find Owner & Roles
-                                            for (const [inst, set] of Object.entries(instanceOwnership)) {
+                                            Object.entries(instanceOwnership).forEach(([inst, set]) => {
                                                 if (set.has(cpuId)) {
-                                                    owner = inst;
-                                                    // Lookup role color
-                                                    const pInst = proposedAllocation?.[inst] || {};
-                                                    const pRoles = pInst[String(cpuId)] || [];
-                                                    coreRoles = pRoles;
+                                                    owners.push(inst);
+                                                    // Get roles for this core in this instance
+                                                    const r = proposedAllocation?.[inst]?.[String(cpuId)] || [];
+                                                    roles.push(...r);
+                                                }
+                                            });
 
-                                                    // Role Priority color (hft-rules style)
-                                                    if (pRoles.length > 0) {
-                                                        // Find highest priority role color
-                                                        if (pRoles.includes('sys_os')) color = COLORS['sys_os'];
-                                                        else if (pRoles.includes('net_irq')) color = COLORS['net_irq'];
-                                                        else if (pRoles.includes('gateway')) color = COLORS['gateway'];
-                                                        else if (pRoles.includes('isolated_robots')) color = COLORS['isolated_robots'];
-                                                        else if (pRoles.includes('pool1')) color = COLORS['pool1'];
-                                                        else if (pRoles.includes('trash')) color = COLORS['trash'];
-                                                        else color = instColors[inst] || '#64748b';
-                                                    } else {
-                                                        color = instColors[inst] || '#64748b';
-                                                    }
-                                                    break;
+                                            const uniqueOwners = [...new Set(owners)];
+
+                                            // Color Logic
+                                            let background = 'var(--bg-panel)';
+                                            let border = '2px solid transparent';
+
+                                            if (uniqueOwners.length === 1) {
+                                                background = instColors[uniqueOwners[0]] || '#334155';
+                                            } else if (uniqueOwners.length > 1) {
+                                                // Intersection!
+                                                // Check if it's OS/IRQ (Shared by design)
+                                                const isSystem = roles.includes('sys_os') || roles.includes('net_irq');
+                                                if (isSystem) {
+                                                    background = SHARED_COLOR;
+                                                    border = '2px dashed #fff';
+                                                } else {
+                                                    // Real intersection (collision?)
+                                                    background = 'repeating-linear-gradient(45deg, #606dbc, #606dbc 10px, #465298 10px, #465298 20px)';
                                                 }
                                             }
 
-                                            // Opacity
+                                            // Opacity for Hover
                                             let opacity = 1;
                                             if (hoveredInstance) {
-                                                const isTarget = owner === hoveredInstance;
-                                                const isOS = owner === 'OS';
-                                                if (!isTarget && !isOS) opacity = 0.2;
+                                                if (!uniqueOwners.includes(hoveredInstance) && !roles.includes('sys_os') && !roles.includes('net_irq')) {
+                                                    opacity = 0.2;
+                                                }
                                             }
 
                                             return (
                                                 <div
                                                     key={cpuId}
                                                     className="core"
-                                                    onMouseEnter={() => owner !== 'Free' && setHoveredInstance(owner)}
+                                                    onMouseEnter={() => uniqueOwners.length > 0 && setHoveredInstance(uniqueOwners[0])}
                                                     onMouseLeave={() => setHoveredInstance(null)}
-                                                    title={`Core ${cpuId} | ${owner} | ${coreRoles.join(',')}`}
+                                                    title={`Core ${cpuId}\nInstances: ${uniqueOwners.join(', ')}\nRoles: ${[...new Set(roles)].join(', ')}`}
                                                     style={{
-                                                        backgroundColor: color,
+                                                        background,
+                                                        border,
                                                         opacity,
                                                         transition: 'opacity 0.2s',
                                                         color: '#fff',
-                                                        cursor: owner !== 'Free' ? 'default' : 'not-allowed',
-                                                        border: coreRoles.includes('sys_os') ? '2px solid #fff' : '2px solid transparent' // Highlight OS
+                                                        cursor: uniqueOwners.length > 0 ? 'default' : 'not-allowed',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
                                                     }}
                                                 >
                                                     {cpuId}
@@ -471,9 +370,9 @@ export function AutoOptimize() {
     return (
         <div className="optimize-container">
             <div className="optimize-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ margin: 0 }}>[AUTO-OPTIMIZATION ENGINE]</h2>
+                <h2 style={{ margin: 0 }}>[AUTO-OPTIMIZATION V2]</h2>
                 <div className="optimize-actions" style={{ display: 'flex', gap: '10px' }}>
-                    <button className="btn btn-primary" onClick={generateOptimization}>GENERATE (Legacy v4.5)</button>
+                    <button className="btn btn-primary" onClick={generateOptimization}>GENERATE V2</button>
                     {recommendations.length > 0 && <button className="btn btn-secondary" onClick={applyRecommendations}>APPLY CONFIG</button>}
                 </div>
             </div>
@@ -484,7 +383,7 @@ export function AutoOptimize() {
                 renderUnifiedMap()
             ) : (
                 <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                    Press GENERATE to calculate optimal placement
+                    Press GENERATE to calculate optimal placement (Demand-Based)
                 </div>
             )}
 
@@ -495,7 +394,7 @@ export function AutoOptimize() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
                         {recommendations.map((rec, idx) => (
                             <div key={idx} className="recommend-card" style={{
-                                borderLeft: `4px solid ${COLORS[rec.role] || instColors[rec.instance] || '#ccc'}`,
+                                borderLeft: `4px solid ${instColors[rec.instance] || '#ccc'}`,
                                 background: 'var(--bg-panel)',
                                 padding: '12px',
                                 borderRadius: 'var(--radius-sm)',
@@ -503,10 +402,10 @@ export function AutoOptimize() {
                             }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                                     <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{rec.title}</span>
-                                    <span style={{ fontSize: '0.8em', opacity: 0.7 }}>{rec.instance}</span>
+                                    <span style={{ fontSize: '0.8em', opacity: 0.7, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: '4px' }}>{rec.instance}</span>
                                 </div>
                                 <div style={{ fontSize: '0.9em', marginBottom: '8px' }}>{rec.description}</div>
-                                {rec.warning && <div style={{ color: 'var(--color-danger)', fontSize: '0.8em', marginBottom: '8px', fontWeight: 600 }}>⚠ {rec.warning}</div>}
+                                <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)', marginBottom: '8px' }}>{rec.rationale}</div>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                                     {rec.cores.map(c => (
                                         <span key={c} style={{ fontSize: '0.75em', padding: '2px 6px', background: 'var(--bg-input)', borderRadius: '4px' }}>{c}</span>
@@ -520,3 +419,4 @@ export function AutoOptimize() {
         </div>
     );
 }
+
