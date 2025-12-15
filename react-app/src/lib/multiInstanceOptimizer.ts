@@ -621,8 +621,7 @@ export function generateRedistributionPlan(
     input: OptimizerInput,
     analysis: OptimizationResult
 ): RedistributionPlan {
-    const { coreNumaMap, netNumaNodes, isolatedCores } = input;
-    const isolatedSet = new Set(isolatedCores);
+    const { coreNumaMap, netNumaNodes, coreLoads } = input;
     const allCores = Object.keys(coreNumaMap).map(Number).sort((a, b) => a - b);
     const netNuma = netNumaNodes.length > 0 ? netNumaNodes[0] : 0;
     const totalCores = allCores.length;
@@ -648,19 +647,36 @@ export function generateRedistributionPlan(
     const sharedIrq: number[] = [];
     const instanceAllocations: RedistributionPlan['instanceAllocations'] = {};
 
-    // ===== STEP 1: OS cores = ONLY non-isolated cores =====
-    const nonIsolatedCores = allCores.filter(c => !isolatedSet.has(c));
-    nonIsolatedCores.forEach(c => {
-        proposedOs.push(c);
-        assigned.add(c);
-    });
+    // ===== STEP 1: Calculate OS cores based on LOAD =====
+    // Target: OS cores should run at ~50% load
+    // Total system load on current OS cores
+    const osLoad = analysis.os.cores.reduce((sum, c) => sum + (coreLoads[c] || 0), 0);
+    const targetLoadPerCore = 0.5; // 50%
+
+    // How many cores needed to achieve 50% load?
+    // If current OS has 2.7 load on 1 core and we want 50%, we need 2.7 / 0.5 = 5.4 ~= 1 core (round up but min 1)
+    // Actually simpler: osNeeded = ceil(osLoad / targetLoadPerCore) but min 1, max 3
+    const osNeeded = Math.max(1, Math.min(3, Math.ceil(osLoad / targetLoadPerCore / allCores.length * 2)));
+
+    // Take first N cores from network NUMA as OS
+    for (let i = 0; i < osNeeded && i < netNumaCores.length; i++) {
+        proposedOs.push(netNumaCores[i]);
+        assigned.add(netNumaCores[i]);
+    }
 
     changes.push(`### Physical / OS Layer ###`);
-    changes.push(`System (OS): [${proposedOs.join(', ')}] (non-isolated)`);
+    changes.push(`System (OS): [${proposedOs.join(', ')}]`);
 
-    // ===== STEP 2: IRQ =====
+    // ===== ALL remaining cores become ISOLATED =====
+    allCores.forEach(c => {
+        if (!proposedOs.includes(c)) {
+            proposedIsolated.push(c);
+        }
+    });
+
+    // ===== STEP 2: IRQ from isolated pool =====
     // Pick first isolated core on network NUMA for IRQ
-    const isolatedNetCores = netNumaCores.filter(c => isolatedSet.has(c) && !assigned.has(c));
+    const isolatedNetCores = proposedIsolated.filter(c => getCoresByNuma(netNuma).includes(c));
     if (isolatedNetCores.length > 0) {
         const irqCore = isolatedNetCores[0];
         sharedIrq.push(irqCore);
@@ -673,7 +689,8 @@ export function generateRedistributionPlan(
     const numInstances = Math.max(1, instanceNames.length);
 
     // Available isolated cores after IRQ
-    let availableIsolated = allCores.filter(c => isolatedSet.has(c) && !assigned.has(c)).sort((a, b) => a - b);
+    const proposedIsolatedSet = new Set(proposedIsolated);
+    let availableIsolated = proposedIsolated.filter(c => !assigned.has(c)).sort((a, b) => a - b);
     let coreIdx = 0;
 
     const takeCores = (n: number): number[] => {
@@ -742,7 +759,7 @@ export function generateRedistributionPlan(
             const availableForRobots = coresPerInstance - gwCount - 3;
             const robotsNet = takeCores(Math.floor(availableForRobots / 3));
             const robotsOther = otherNumaCores
-                .filter(c => isolatedSet.has(c) && !assigned.has(c))
+                .filter(c => proposedIsolatedSet.has(c) && !assigned.has(c))
                 .slice(0, Math.floor(availableForRobots * 2 / 3));
             robotsOther.forEach(c => assigned.add(c));
 
@@ -769,8 +786,7 @@ export function generateRedistributionPlan(
         }
     });
 
-    // ===== STEP 4: Proposed isolated = all originally isolated =====
-    isolatedCores.forEach(c => proposedIsolated.push(c));
+    // ===== Proposed isolated already calculated above =====
     const uniqueIsolated = [...new Set(proposedIsolated)].sort((a, b) => a - b);
 
     changes.push(`### Isolation ###`);
