@@ -1,10 +1,83 @@
 import { useState } from 'react';
+import { useDrag } from 'react-dnd';
 import { InputPanel } from './InputPanel';
 import { TopologyMap } from './TopologyMap';
 import { ConfigOutput } from './ConfigOutput';
 import { ValidationPanel } from './ValidationPanel';
 import { useAppStore } from '../store/appStore';
 import { ROLES } from '../types/topology';
+
+interface DraggableRoleProps {
+    id: string;
+    role: { name: string; color: string };
+    isActive: boolean;
+    onClick: () => void;
+}
+
+function DraggableRole({ id, role, isActive, onClick }: DraggableRoleProps) {
+    const [{ isDragging }, drag] = useDrag(() => ({
+        type: 'ROLE',
+        item: { roleId: id },
+        collect: (monitor) => ({
+            isDragging: !!monitor.isDragging(),
+        }),
+    }));
+
+    return (
+        <div
+            ref={drag as unknown as React.RefObject<HTMLDivElement>}
+            onClick={onClick}
+            style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 10px',
+                borderRadius: '6px',
+                cursor: 'grab',
+                background: isActive ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                border: isActive ? '1px solid var(--color-primary)' : '1px solid transparent',
+                transition: 'all 0.15s',
+                opacity: isDragging ? 0.5 : 1
+            }}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '4px',
+                    background: role.color,
+                    border: '1px solid rgba(255,255,255,0.2)'
+                }} />
+                <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-main)' }}>{role.name}</span>
+            </div>
+
+            <div style={{ position: 'relative', width: '32px', height: '18px' }}>
+                <div style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left: '0',
+                    width: '32px',
+                    height: '14px',
+                    background: isActive ? 'var(--color-primary)' : 'var(--bg-input)',
+                    borderRadius: '7px',
+                    border: isActive ? 'none' : '1px solid var(--border-color)',
+                    transition: 'background 0.2s'
+                }} />
+                <div style={{
+                    position: 'absolute',
+                    top: '0',
+                    left: isActive ? '14px' : '0',
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    background: 'white',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                    transition: 'left 0.2s'
+                }} />
+            </div>
+        </div>
+    );
+}
 
 // Tags & Legend panel with toggle switches
 function TagsLegend() {
@@ -33,65 +106,15 @@ function TagsLegend() {
                 Tags & Legend
             </div>
 
-            {roleEntries.map(([id, role]) => {
-                const isActive = activeTool === id;
-                return (
-                    <div
-                        key={id}
-                        onClick={() => setActiveTool(isActive ? null : id)}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            padding: '8px 10px',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            background: isActive ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
-                            border: isActive ? '1px solid var(--color-primary)' : '1px solid transparent',
-                            transition: 'all 0.15s'
-                        }}
-                    >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                                width: '16px',
-                                height: '16px',
-                                borderRadius: '4px',
-                                background: role.color,
-                                border: '1px solid rgba(255,255,255,0.2)'
-                            }} />
-                            <span style={{
-                                fontSize: '12px',
-                                fontWeight: isActive ? 600 : 400,
-                                color: isActive ? 'var(--color-primary)' : 'var(--text-primary)'
-                            }}>
-                                {role.name}
-                            </span>
-                        </div>
-
-                        {/* Toggle switch */}
-                        <div style={{
-                            width: '36px',
-                            height: '20px',
-                            borderRadius: '10px',
-                            background: isActive ? 'var(--color-primary)' : 'var(--bg-input)',
-                            position: 'relative',
-                            transition: 'background 0.2s'
-                        }}>
-                            <div style={{
-                                position: 'absolute',
-                                top: '2px',
-                                left: isActive ? '18px' : '2px',
-                                width: '16px',
-                                height: '16px',
-                                borderRadius: '50%',
-                                background: 'white',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                                transition: 'left 0.2s'
-                            }} />
-                        </div>
-                    </div>
-                );
-            })}
+            {roleEntries.map(([id, role]) => (
+                <DraggableRole
+                    key={id}
+                    id={id}
+                    role={role}
+                    isActive={activeTool === id}
+                    onClick={() => setActiveTool(activeTool === id ? null : id)}
+                />
+            ))}
 
             {/* Clear button */}
             <button

@@ -4,6 +4,8 @@ import { CompareView } from './components/CompareView';
 import { AutoOptimize } from './components/AutoOptimize';
 import { useAppStore } from './store/appStore';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import './App.css';
 
 function AppContent() {
@@ -86,7 +88,9 @@ function AppContent() {
 function App() {
   return (
     <ThemeProvider>
-      <AppContent />
+      <DndProvider backend={HTML5Backend}>
+        <AppContent />
+      </DndProvider>
     </ThemeProvider>
   );
 }

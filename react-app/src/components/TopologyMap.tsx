@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useDrop } from 'react-dnd';
 import { useAppStore } from '../store/appStore';
 import { ROLES } from '../types/topology';
 import { CoreTooltip } from './Tooltip';
@@ -34,10 +35,22 @@ interface CoreProps {
     load?: number;
     onMouseDown: (e: React.MouseEvent) => void;
     onMouseEnter: (e: React.MouseEvent) => void;
+    onDrop: (roleId: string) => void;
 }
 
-function Core({ cpuId, roles, ownerInstance, instanceColor, isIsolated, load, onMouseDown, onMouseEnter }: CoreProps) {
+function Core({ cpuId, roles, ownerInstance, instanceColor, isIsolated, load, onMouseDown, onMouseEnter, onDrop }: CoreProps) {
     const { activeTool } = useAppStore();
+
+    const [{ isOver, canDrop }, drop] = useDrop(() => ({
+        accept: 'ROLE',
+        drop: (item: { roleId: string }) => {
+            onDrop(item.roleId);
+        },
+        collect: (monitor) => ({
+            isOver: !!monitor.isOver(),
+            canDrop: !!monitor.canDrop(),
+        }),
+    }));
 
     const primaryRole = roles[0];
     const roleColor = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#1e293b';
@@ -62,12 +75,15 @@ function Core({ cpuId, roles, ownerInstance, instanceColor, isIsolated, load, on
     return (
         <CoreTooltip cpuId={cpuId} roles={roles} load={load} isIsolated={isIsolated} instanceName={ownerInstance}>
             <div
+                ref={drop as unknown as React.RefObject<HTMLDivElement>}
                 onMouseDown={onMouseDown}
                 onMouseEnter={onMouseEnter}
                 className={`core ${hasMultipleRoles ? 'multi-role' : ''}`}
                 style={{
                     background,
-                    border: borderStyle,
+                    border: isOver ? '2px solid white' : (canDrop ? '1px dashed rgba(255,255,255,0.5)' : borderStyle),
+                    transform: isOver ? 'scale(1.1)' : 'scale(1)',
+                    zIndex: isOver ? 10 : 1,
                     cursor: activeTool ? 'pointer' : 'default',
                     position: 'relative',
                     width: '48px',
@@ -357,6 +373,7 @@ export function TopologyMap() {
                                                                 load={coreLoads[cpuId]}
                                                                 onMouseDown={(e) => onCoreMouseDown(cpuId, e)}
                                                                 onMouseEnter={() => onCoreMouseEnter(cpuId)}
+                                                                onDrop={(roleId) => paintCore(cpuId, roleId)}
                                                             />
                                                         );
                                                     })}
