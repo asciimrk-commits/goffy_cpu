@@ -19,6 +19,7 @@ interface AppState {
 
     // Configuration
     instances: InstanceConfig;
+    previousInstances: InstanceConfig | null;
 
     // UI State
     activeTool: string | null;
@@ -36,6 +37,7 @@ interface AppState {
     setNetNumaNodes: (nodes: number[]) => void;
     setCoreLoads: (loads: Record<number, number>) => void;
     setInstances: (instances: InstanceConfig) => void;
+    setPreviousInstances: (instances: InstanceConfig | null) => void;
     setActiveTool: (tool: string | null) => void;
     setActiveTab: (tab: 'mapper' | 'compare' | 'optimize') => void;
     toggleSidebar: () => void;
@@ -43,6 +45,7 @@ interface AppState {
     // Core painting
     paintCore: (cpuId: number, roleId: string) => void;
     eraseCore: (cpuId: number, roleId?: string) => void;
+    assignInstanceToL3: (instanceId: string, l3Id: string) => void;
 
     // Reset
     reset: () => void;
@@ -60,6 +63,7 @@ const initialState = {
     netNumaNodes: [],
     coreLoads: {},
     instances: { Physical: {} },
+    previousInstances: null,
     activeTool: null,
     activeTab: 'mapper' as const,
     sidebarCollapsed: false,
@@ -80,6 +84,7 @@ export const useAppStore = create<AppState>()(
             setNetNumaNodes: (nodes) => set({ netNumaNodes: nodes }),
             setCoreLoads: (loads) => set({ coreLoads: loads }),
             setInstances: (instances) => set({ instances }),
+            setPreviousInstances: (prev) => set({ previousInstances: prev }),
             setActiveTool: (tool) => set({ activeTool: tool }),
             setActiveTab: (tab) => set({ activeTab: tab }),
             toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -133,6 +138,78 @@ export const useAppStore = create<AppState>()(
                 }
 
                 set({ instances: newInstances });
+            },
+
+            assignInstanceToL3: (instanceId, l3Id) => {
+                const { instances, l3Groups, isolatedCores } = get();
+                const l3Cores = l3Groups[l3Id] || [];
+
+                // Get current assignments for this instance
+                const currentMap = instances[instanceId];
+                if (!currentMap || Object.keys(currentMap).length === 0) return;
+
+                // Extract roles from current assignments
+                // structure: [ { roles: [...] }, ... ]
+                const tasksToMove: string[][] = Object.values(currentMap);
+
+                // Simpler: 1. Clean up old. 2. Find free. 3. Assign.
+
+                // 1. Clean up old assignments
+                // Create a working copy of instances
+                const nextInstances = JSON.parse(JSON.stringify(instances));
+
+                // Remove from Physical using currentMap keys
+                Object.keys(currentMap).forEach(cpuStr => {
+                    if (nextInstances.Physical[cpuStr]) {
+                        // Filter out roles that belong to this instance??
+                        // Actually, instances[instanceId] stores roles for that instance.
+                        // But Physical stores aggregated roles.
+                        // If we assume strict ownership or just remove matching roles.
+                        // Let's just remove the roles listed in currentMap[cpuStr].
+                        const rolesToRemove = currentMap[cpuStr];
+                        nextInstances.Physical[cpuStr] = nextInstances.Physical[cpuStr].filter((r: string) => !rolesToRemove.includes(r));
+                    }
+                });
+
+                // Clear the instance specific map
+                nextInstances[instanceId] = {};
+
+                // 2. Find free cores NOW (after cleanup, check if target L3 has free cores)
+                // Note: If we moved FROM this L3, cores are now free.
+                const availableCores = l3Cores.filter(c => {
+                    const cStr = String(c);
+                    return !nextInstances.Physical[cStr] || nextInstances.Physical[cStr].length === 0;
+                });
+
+                // 3. Assign to available cores
+                let assignedCount = 0;
+                const newIsolated = [...isolatedCores];
+
+                tasksToMove.forEach(roles => {
+                    if (assignedCount < availableCores.length) {
+                        const targetCpu = availableCores[assignedCount];
+                        const targetStr = String(targetCpu);
+
+                        // Update Physical
+                        nextInstances.Physical[targetStr] = roles;
+
+                        // Update Instance Map
+                        nextInstances[instanceId][targetStr] = roles;
+
+                        // Update Isolated (if needed)
+                        if (!newIsolated.includes(targetCpu)) {
+                            newIsolated.push(targetCpu);
+                        }
+
+                        assignedCount++;
+                    } else {
+                        // Overflow / Alert? 
+                        // For now, just drop the roles if no space.
+                        console.warn(`Not enough space in L3 ${l3Id} for instance ${instanceId}`);
+                    }
+                });
+
+                set({ instances: nextInstances, isolatedCores: newIsolated });
             },
 
             reset: () => set(initialState),

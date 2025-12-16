@@ -1,10 +1,50 @@
 import { useState } from 'react';
+import { useDrag } from 'react-dnd';
 import { useAppStore } from '../store/appStore';
 import { parseTopology } from '../lib/parser';
+
+function DraggableInstance({ name, count }: { name: string; count: number }) {
+    const [{ isDragging }, drag] = useDrag(() => ({
+        type: 'INSTANCE',
+        item: { instanceId: name },
+        collect: (monitor) => ({
+            isDragging: !!monitor.isDragging(),
+        }),
+    }));
+
+    return (
+        <div
+            ref={drag as unknown as React.RefObject<HTMLDivElement>}
+            style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '8px 12px',
+                background: 'var(--bg-input)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                marginBottom: '8px',
+                cursor: 'grab',
+                opacity: isDragging ? 0.5 : 1,
+                fontSize: '12px'
+            }}
+        >
+            <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{name}</span>
+            <span style={{
+                color: 'var(--text-muted)',
+                background: 'rgba(255,255,255,0.05)',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                fontSize: '10px'
+            }}>{count} cores</span>
+        </div>
+    );
+}
 
 export function InputPanel() {
     const {
         rawInput,
+        instances,
         setRawInput,
         setServerInfo,
         setGeometry,
@@ -118,6 +158,38 @@ export function InputPanel() {
                             Clear
                         </button>
                     </div>
+                </div>
+            )}
+            {/* Instance List */}
+            {hasData && (
+                <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0' }}>
+                    <div style={{
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: 'var(--text-muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                        marginBottom: '12px'
+                    }}>
+                        Instances ({Object.keys(instances).length - 1})
+                    </div>
+
+                    {Object.entries(instances)
+                        .filter(([name]) => name !== 'Physical')
+                        .map(([name, cores]) => (
+                            <DraggableInstance
+                                key={name}
+                                name={name}
+                                count={Object.keys(cores).length}
+                            />
+                        ))
+                    }
+
+                    {Object.keys(instances).length <= 1 && (
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                            No instances found.
+                        </div>
+                    )}
                 </div>
             )}
         </div>

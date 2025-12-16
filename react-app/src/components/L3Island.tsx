@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import { useDrop } from 'react-dnd';
 import { type L3Zone } from '../lib/hftOptimizer';
 import { ZONE_COLORS } from '../context/ThemeContext';
 
@@ -8,6 +9,7 @@ interface L3IslandProps {
     numa: number;
     coreCount: number;
     children: ReactNode;
+    onDropInstance?: (instanceId: string) => void;
 }
 
 /**
@@ -18,7 +20,17 @@ interface L3IslandProps {
  * - GOLD (amber): Gateways + IRQ
  * - SILVER (grey): Robots + overflow
  */
-export function L3Island({ l3Id, zone, numa, coreCount, children }: L3IslandProps) {
+export function L3Island({ l3Id, zone, numa, coreCount, children, onDropInstance }: L3IslandProps) {
+    const [{ isOver }, drop] = useDrop(() => ({
+        accept: 'INSTANCE',
+        drop: (item: { instanceId: string }) => {
+            if (onDropInstance) onDropInstance(item.instanceId);
+        },
+        collect: (monitor) => ({
+            isOver: !!monitor.isOver(),
+        }),
+    }));
+
     const zoneStyle = ZONE_COLORS[zone];
 
     const zoneLabel = {
@@ -35,15 +47,18 @@ export function L3Island({ l3Id, zone, numa, coreCount, children }: L3IslandProp
 
     return (
         <div
+            ref={drop as unknown as React.RefObject<HTMLDivElement>}
             className="l3-island"
             style={{
-                background: zoneStyle.bg,
-                border: `2px solid ${zoneStyle.border}`,
+                background: isOver ? `${zoneStyle.bg.replace('0.1', '0.3')}` : zoneStyle.bg,
+                border: isOver ? `2px dashed ${zoneStyle.border}` : `2px solid ${zoneStyle.border}`,
                 borderRadius: 'var(--radius-lg)',
                 padding: '12px',
                 marginBottom: '12px',
                 position: 'relative',
-                transition: 'all 0.2s'
+                transition: 'all 0.2s',
+                transform: isOver ? 'scale(1.02)' : 'scale(1)',
+                boxShadow: isOver ? `0 0 15px ${zoneStyle.border}40` : 'none'
             }}
         >
             {/* L3 Header */}

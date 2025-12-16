@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useDrop } from 'react-dnd';
 import { useAppStore } from '../store/appStore';
-import { ROLES } from '../types/topology';
-import { CoreTooltip } from './Tooltip';
 import { L3Island } from './L3Island';
+import { Core } from './Core';
 import type { L3Zone } from '../lib/hftOptimizer';
 
 // Instance colors
@@ -26,138 +24,31 @@ function getInstanceColor(instanceName: string, index: number): string {
     return PREDEFINED_INSTANCE_COLORS[index % PREDEFINED_INSTANCE_COLORS.length];
 }
 
-interface CoreProps {
-    cpuId: number;
-    roles: string[];
-    ownerInstance?: string;
-    instanceColor?: string;
-    isIsolated: boolean;
-    load?: number;
-    onMouseDown: (e: React.MouseEvent) => void;
-    onMouseEnter: (e: React.MouseEvent) => void;
-    onDrop: (roleId: string) => void;
-}
-
-function Core({ cpuId, roles, ownerInstance, instanceColor, isIsolated, load, onMouseDown, onMouseEnter, onDrop }: CoreProps) {
-    const { activeTool } = useAppStore();
-
-    const [{ isOver, canDrop }, drop] = useDrop(() => ({
-        accept: 'ROLE',
-        drop: (item: { roleId: string }) => {
-            onDrop(item.roleId);
-        },
-        collect: (monitor) => ({
-            isOver: !!monitor.isOver(),
-            canDrop: !!monitor.canDrop(),
-        }),
-    }));
-
-    const primaryRole = roles[0];
-    const roleColor = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#1e293b';
-    const hasMultipleRoles = roles.length > 1;
-
-    // Build background based on roles
-    let background = roleColor;
-    if (hasMultipleRoles) {
-        const colors = roles.slice(0, 3).map(r => ROLES[r]?.color || '#64748b');
-        if (colors.length === 2) {
-            background = `linear-gradient(135deg, ${colors[0]} 50%, ${colors[1]} 50%)`;
-        } else if (colors.length >= 3) {
-            background = `linear-gradient(135deg, ${colors[0]} 33%, ${colors[1]} 33% 66%, ${colors[2]} 66%)`;
-        }
-    }
-
-    // Border for isolated cores
-    const borderStyle = isIsolated
-        ? '2px solid rgba(255,255,255,0.4)'
-        : '1px solid rgba(255,255,255,0.1)';
-
-    return (
-        <CoreTooltip cpuId={cpuId} roles={roles} load={load} isIsolated={isIsolated} instanceName={ownerInstance}>
-            <div
-                ref={drop as unknown as React.RefObject<HTMLDivElement>}
-                onMouseDown={onMouseDown}
-                onMouseEnter={onMouseEnter}
-                className={`core ${hasMultipleRoles ? 'multi-role' : ''}`}
-                style={{
-                    background,
-                    border: isOver ? '2px solid white' : (canDrop ? '1px dashed rgba(255,255,255,0.5)' : borderStyle),
-                    transform: isOver ? 'scale(1.1)' : 'scale(1)',
-                    zIndex: isOver ? 10 : 1,
-                    cursor: activeTool ? 'pointer' : 'default',
-                    position: 'relative',
-                    width: '48px',
-                    height: '48px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 'var(--radius-md)',
-                    fontFamily: 'var(--font-mono)',
-                    color: '#fff',
-                    transition: 'transform 0.1s, box-shadow 0.1s',
-                    boxShadow: 'var(--shadow-sm)'
-                }}
-            >
-                {/* Physical ID - Large */}
-                <span style={{ fontSize: '14px', fontWeight: 700, lineHeight: 1 }}>{cpuId}</span>
-                {/* Role indicator - Small */}
-                {primaryRole && (
-                    <span style={{ fontSize: '8px', opacity: 0.8, textTransform: 'uppercase', marginTop: '2px' }}>
-                        {ROLES[primaryRole]?.name?.substring(0, 3) || ''}
-                    </span>
-                )}
-                {/* Instance badge */}
-                {ownerInstance && ownerInstance !== 'Physical' && (
-                    <div style={{
-                        position: 'absolute',
-                        top: '-6px',
-                        right: '-6px',
-                        fontSize: '8px',
-                        background: instanceColor || '#8b5cf6',
-                        color: 'white',
-                        padding: '1px 4px',
-                        borderRadius: '3px',
-                        fontWeight: 700,
-                        whiteSpace: 'nowrap',
-                        maxWidth: '30px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.3)'
-                    }}>
-                        {ownerInstance.slice(0, 4)}
-                    </div>
-                )}
-                {/* Load indicator */}
-                {load !== undefined && load > 0 && (
-                    <div style={{
-                        position: 'absolute',
-                        bottom: '2px',
-                        left: '2px',
-                        right: '2px',
-                        height: '3px',
-                        background: 'rgba(0,0,0,0.3)',
-                        borderRadius: '2px',
-                        overflow: 'hidden'
-                    }}>
-                        <div style={{
-                            width: `${Math.min(100, load)}%`,
-                            height: '100%',
-                            background: load > 70 ? '#ef4444' : load > 40 ? '#f59e0b' : '#10b981',
-                            borderRadius: '2px'
-                        }} />
-                    </div>
-                )}
-            </div>
-        </CoreTooltip>
-    );
-}
+// Core component was here
+// It has been moved to Core.tsx
 
 export function TopologyMap() {
-    const { geometry, instances, isolatedCores, coreLoads, activeTool, paintCore, eraseCore, netNumaNodes } = useAppStore();
+    const {
+        geometry,
+        instances,
+        previousInstances,
+        isolatedCores,
+        coreLoads,
+        activeTool,
+        paintCore,
+        eraseCore,
+        netNumaNodes,
+        assignInstanceToL3
+    } = useAppStore();
     const isolatedSet = new Set(isolatedCores);
 
     const [isDragging, setIsDragging] = useState(false);
+    const [showDiff, setShowDiff] = useState(false);
+
+    // Auto-enable diff if previousInstances exists
+    useEffect(() => {
+        if (previousInstances) setShowDiff(true);
+    }, [previousInstances]);
     const [dragMode, setDragMode] = useState<'paint' | 'erase'>('paint');
 
     useEffect(() => {
@@ -251,12 +142,46 @@ export function TopologyMap() {
                 padding: '8px 16px',
                 background: 'var(--bg-input)',
                 borderRadius: '8px',
-                fontSize: '12px'
+                fontSize: '12px',
+                alignItems: 'center',
+                justifyContent: 'space-between'
             }}>
-                <div><strong>Всего ядер:</strong> {totalCores}</div>
-                <div><strong>Изолировано:</strong> {isolatedCount}</div>
-                <div><strong>Сокетов:</strong> {Object.keys(geometry).length}</div>
-                <div><strong>NUMA узлов:</strong> {Object.values(geometry).reduce((acc, s) => acc + Object.keys(s).length, 0)}</div>
+                <div style={{ display: 'flex', gap: '24px' }}>
+                    <div><strong>Всего ядер:</strong> {totalCores}</div>
+                    <div><strong>Изолировано:</strong> {isolatedCount}</div>
+                    <div><strong>Сокетов:</strong> {Object.keys(geometry).length}</div>
+                    <div><strong>NUMA узлов:</strong> {Object.values(geometry).reduce((acc, s) => acc + Object.keys(s).length, 0)}</div>
+                </div>
+                {previousInstances && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ghost Diff</span>
+                        <div
+                            onClick={() => setShowDiff(!showDiff)}
+                            style={{
+                                width: '32px',
+                                height: '18px',
+                                background: showDiff ? 'var(--color-primary)' : 'var(--bg-input)',
+                                borderRadius: '10px',
+                                position: 'relative',
+                                cursor: 'pointer',
+                                transition: 'background 0.2s',
+                                border: '1px solid var(--border-color)'
+                            }}
+                        >
+                            <div style={{
+                                width: '14px',
+                                height: '14px',
+                                background: 'white',
+                                borderRadius: '50%',
+                                position: 'absolute',
+                                top: '1px',
+                                left: showDiff ? '15px' : '1px',
+                                transition: 'left 0.2s',
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                            }} />
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Topology grid - matching reference design */}
@@ -354,6 +279,7 @@ export function TopologyMap() {
                                                 zone={zone}
                                                 numa={parseInt(numaId)}
                                                 coreCount={cores.length}
+                                                onDropInstance={(instanceId) => assignInstanceToL3(instanceId, l3Id)}
                                             >
                                                 <div className="cores-grid" style={{
                                                     display: 'flex',
@@ -361,7 +287,27 @@ export function TopologyMap() {
                                                     gap: '6px'
                                                 }}>
                                                     {cores.map(cpuId => {
-                                                        const { roles, owner, instanceColor } = getCoreData(cpuId);
+                                                        const { roles } = getCoreData(cpuId);
+                                                        const owner = Object.entries(instances).find(([name, instCores]) => {
+                                                            if (name === 'Physical') return false;
+                                                            return !!(instCores as Record<string, string[]>)[String(cpuId)];
+                                                        })?.[0];
+
+                                                        // Find previous owner for ghost diff
+                                                        let ghostOwner: string | undefined;
+                                                        if (showDiff && previousInstances) {
+                                                            ghostOwner = Object.entries(previousInstances).find(([name, instCores]) => {
+                                                                if (name === 'Physical') return false;
+                                                                return !!(instCores as Record<string, string[]>)[String(cpuId)];
+                                                            })?.[0];
+
+                                                            // Only show ghost if different from current
+                                                            if (ghostOwner === owner) ghostOwner = undefined;
+                                                        }
+
+                                                        const instanceColor = owner ? getInstanceColor(owner, 0) : undefined;
+                                                        const ghostColor = ghostOwner ? getInstanceColor(ghostOwner, 0) : undefined;
+
                                                         return (
                                                             <Core
                                                                 key={cpuId}
@@ -369,6 +315,8 @@ export function TopologyMap() {
                                                                 roles={roles}
                                                                 ownerInstance={owner}
                                                                 instanceColor={instanceColor}
+                                                                ghostOwner={ghostOwner}
+                                                                ghostColor={ghostColor}
                                                                 isIsolated={isolatedSet.has(cpuId)}
                                                                 load={coreLoads[cpuId]}
                                                                 onMouseDown={(e) => onCoreMouseDown(cpuId, e)}
