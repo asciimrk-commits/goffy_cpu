@@ -1,8 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { parseTopology, parseYamlConfig } from '../lib/parser';
-import { ROLES } from '../types/topology';
+
 import type { Geometry, InstanceConfig } from '../types/topology';
-import { CoreTooltip } from './Tooltip';
+import { Core } from './Core';
+import { L3Island } from './L3Island';
+import { classifyL3Zones } from '../lib/hftOptimizer';
 
 interface ConfigData {
   serverName: string;
@@ -26,16 +28,84 @@ function ComparePanel({ config }: { config: ConfigData | null }) {
     );
   }
 
-  const isolatedSet = new Set(config.isolatedCores);
+  /* eslint-disable @typescript-eslint/no-unused-vars */
+  const { socketGroups, totalCores, isolatedSet } = useMemo(() => {
+    if (!config) return { socketGroups: {}, totalCores: 0, isolatedSet: new Set<number>() };
 
-  // Calculate stats
-  const totalCores = Object.values(config.geometry).flatMap(s =>
-    Object.values(s).flatMap(n => Object.values(n).flat())
-  ).length;
+    // 1. Rebuild maps for classifier
+    const coreNumaMap: Record<string, number> = {};
+    const l3Groups: Record<string, number[]> = {};
+
+    // Parse geometry
+    let tCores = 0;
+    Object.entries(config.geometry).forEach(([, numas]) => {
+      Object.entries(numas).forEach(([numaId, l3s]) => {
+        const nId = Number(numaId);
+        Object.entries(l3s).forEach(([l3Id, cores]) => {
+          l3Groups[l3Id] = cores;
+          cores.forEach(c => coreNumaMap[String(c)] = nId);
+          tCores += cores.length;
+        });
+      });
+    });
+
+    // 2. Infer OS cores
+    const instancePhysical = config.instances.Physical || {};
+    const osCores = Object.entries(instancePhysical)
+      .filter(([, roles]) => roles.includes('sys_os'))
+      .map(([id]) => Number(id));
+
+    // 3. Classify Zones (assume Net NUMA = 0)
+    const l3List = classifyL3Zones(l3Groups, coreNumaMap, 0, osCores);
+
+    // 4. Group by Socket for display
+    // Map L3 ID back to Socket? We can use coreNumaMap -> NUMA -> Socket?
+    // Geometry is Socket -> Numa -> L3.
+    // Let's iterate Geometry and attach Zone info.
+
+    // Create a map of L3ID -> Zone
+    const zoneMap = new Map(l3List.map(l3 => [l3.id, l3]));
+
+    const sGroups: Record<string, typeof config.geometry[string]> = config.geometry;
+    const iSet = new Set(config.isolatedCores);
+
+    return { socketGroups: sGroups, totalCores: tCores, zoneMap, isolatedSet: iSet };
+  }, [config]);
+
+  if (!config) {
+    return (
+      <div className="compare-panel empty" style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '200px',
+        color: 'var(--text-muted)'
+      }}>
+        <p>Вставьте конфиг или загрузите файл, затем нажмите Parse</p>
+      </div>
+    );
+  }
+
+  // Helper to find instance owner
+  const getOwner = (cpuId: number) => {
+    return Object.entries(config.instances).find(([name, coreMap]) => {
+      if (name === 'Physical') return false;
+      return !!coreMap[String(cpuId)];
+    })?.[0];
+  };
+
+  // Helper for colors
+  const PREDEFINED = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#06b6d4'];
+  const getInstColor = (name?: string) => {
+    if (!name) return undefined;
+    // Simple hash for consistency
+    const idx = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    return PREDEFINED[idx % PREDEFINED.length];
+  };
 
   return (
     <div className="compare-panel">
-      {/* Header with server name and stats */}
+      {/* Header */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -51,127 +121,91 @@ function ComparePanel({ config }: { config: ConfigData | null }) {
         </div>
       </div>
 
-      {Object.entries(config.geometry).map(([socketId, numaData]) => (
-        <div
-          key={socketId}
-          className="socket-card"
-          style={{
-            border: '2px solid var(--color-primary)',
-            borderRadius: '12px',
+      {/* Grid */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {Object.entries(socketGroups).map(([socketId, numas]) => (
+          <div key={socketId} style={{
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
             padding: '12px',
-            marginBottom: '12px',
             background: 'var(--bg-panel)'
-          }}
-        >
-          <div style={{
-            display: 'inline-block',
-            background: 'var(--color-primary)',
-            color: 'white',
-            padding: '4px 12px',
-            borderRadius: '6px',
-            fontSize: '11px',
-            fontWeight: 700,
-            marginBottom: '10px'
           }}>
-            Socket {socketId}
-          </div>
-
-          {Object.entries(numaData).map(([numaId, l3Data]) => (
-            <div
-              key={numaId}
-              className="numa-section"
-              style={{
-                border: '1px dashed var(--border-color)',
-                borderRadius: '8px',
-                padding: '10px',
-                marginBottom: '8px',
-                background: 'rgba(100,100,150,0.03)'
-              }}
-            >
-              <div style={{
-                fontSize: '10px',
-                fontWeight: 600,
-                marginBottom: '8px'
-              }}>
-                <span style={{
-                  background: 'var(--color-accent)',
-                  color: 'white',
-                  padding: '2px 6px',
-                  borderRadius: '4px'
-                }}>
-                  NUMA {numaId}
-                </span>
-              </div>
-
-              {Object.entries(l3Data).map(([l3Id, cores]) => (
-                <div
-                  key={l3Id}
-                  style={{
-                    background: 'var(--bg-input)',
-                    borderRadius: '6px',
-                    padding: '8px',
-                    marginBottom: '6px'
-                  }}
-                >
-                  <div style={{
-                    fontSize: '9px',
-                    color: 'var(--text-muted)',
-                    marginBottom: '6px'
-                  }}>
-                    L3 #{l3Id} ({cores.length} ядер)
-                  </div>
-                  <div className="cmp-cores" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                    {cores.map(cpuId => {
-                      const roles = config.instances.Physical[String(cpuId)] || [];
-                      const primaryRole = roles[0];
-                      const color = primaryRole ? ROLES[primaryRole]?.color || '#64748b' : '#334155';
-                      const isIsolated = isolatedSet.has(cpuId);
-                      const hasMultipleRoles = roles.length > 1;
-
-                      let background = color;
-                      if (hasMultipleRoles) {
-                        const colors = roles.slice(0, 3).map(r => ROLES[r]?.color || '#64748b');
-                        if (colors.length === 2) background = `linear-gradient(135deg, ${colors[0]} 50%, ${colors[1]} 50%)`;
-                        else if (colors.length >= 3) background = `linear-gradient(135deg, ${colors[0]} 33%, ${colors[1]} 33% 66%, ${colors[2]} 66%)`;
-                      }
-
-                      return (
-                        <CoreTooltip
-                          key={cpuId}
-                          cpuId={cpuId}
-                          roles={roles}
-                          isIsolated={isIsolated}
-                        >
-                          <div
-                            className={`core ${hasMultipleRoles ? 'multi-role' : ''}`}
-                            style={{
-                              width: '32px',
-                              height: '32px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              background,
-                              border: isIsolated ? '2px solid rgba(255,255,255,0.4)' : '1px solid rgba(255,255,255,0.1)',
-                              borderRadius: '4px',
-                              color: '#fff',
-                              fontSize: '10px',
-                              fontWeight: 600,
-                              opacity: roles.length > 0 || isIsolated ? 1 : 0.3
-                            }}
-                          >
-                            {cpuId}
-                          </div>
-                        </CoreTooltip>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+            <div style={{ fontSize: '10px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-muted)' }}>
+              SOCKET {socketId}
             </div>
-          ))}
-        </div>
-      ))}
+
+            {Object.entries(numas).map(([numaId, l3s]) => (
+              <div key={numaId} style={{ marginBottom: '8px' }}>
+                {Object.entries(l3s).map(([l3Id, cores]) => {
+                  // Find classified zone
+                  // Reconstruct core list or look up in calculated L3 list?
+                  // classifyL3Zones takes l3Groups.
+                  // We can just find the relevant L3Cache object
+                  const nId = Number(numaId);
+                  // We need to match Logic with UI
+                  // Let's use the classified zone if available, else silver
+                  // But map logic in useMemo is complex.
+
+                  // Let's just re-classify on fly or use lookups?
+                  // Better: Pass `zoneMap` from useMemo
+
+                  return (
+                    <div key={l3Id} style={{ marginBottom: '8px' }}>
+                      {/* We need to wrap it in a way L3Island expects */}
+                      {/* But L3Island includes styles for visual box */}
+                      {/* Let's render L3Island directly */}
+                      <L3Config
+                        l3Id={l3Id}
+                        cores={cores}
+                        numaId={nId}
+                        config={config}
+                        isolatedSet={isolatedSet}
+                        getOwner={getOwner}
+                        getInstColor={getInstColor}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
+  );
+}
+
+// Helper component to separate logic
+function L3Config({ l3Id, cores, numaId, config, isolatedSet, getOwner, getInstColor }: any) {
+  const hasOs = cores.some((c: number) => (config.instances.Physical[String(c)] || []).includes('sys_os'));
+  const isNetwork = numaId === 0; // Assumption
+  const zone = hasOs ? 'dirty' : (isNetwork ? 'gold' : 'silver');
+
+  return (
+    <L3Island l3Id={l3Id} zone={zone} numa={numaId} coreCount={cores.length}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+        {cores.map((cpuId: number) => {
+          const roles = config.instances.Physical[String(cpuId)] || [];
+          const owner = getOwner(cpuId);
+          const isIso = isolatedSet.has(cpuId);
+
+          return (
+            <Core
+              key={cpuId}
+              cpuId={cpuId}
+              roles={roles}
+              ownerInstance={owner}
+              instanceColor={getInstColor(owner)}
+              isIsolated={isIso}
+              load={0} // No load in static config
+              onMouseDown={() => { }}
+              onMouseEnter={() => { }}
+              onDrop={() => { }}
+            />
+          );
+        })}
+      </div>
+    </L3Island>
   );
 }
 

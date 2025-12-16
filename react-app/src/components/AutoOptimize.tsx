@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useAppStore } from '../store/appStore';
-import { optimizeTopology, type OptimizationResult, type Instance } from '../lib/hftOptimizer';
+import { optimizeTopology, type OptimizationResult, type Instance, type CoreAllocation } from '../lib/hftOptimizer';
 import { L3Island } from './L3Island';
 import { Core } from './Core';
+import { exportToBender, downloadYaml } from '../lib/exporter';
+import type { InstanceConfig } from '../types/topology';
 
 export function AutoOptimize() {
     const {
@@ -59,25 +61,19 @@ export function AutoOptimize() {
         }, 100);
     };
 
-    const handleApply = () => {
-        if (!result) return;
-
-        // 1. Save current state as previous (for Ghost Diff)
-        setPreviousInstances(instances);
-
-        // 2. Convert allocations to InstanceConfig
-        const newInstances: any = {
+    const allocationsToConfig = (allocs: CoreAllocation[]): InstanceConfig => {
+        const newInstances: InstanceConfig = {
             Physical: {}
         };
 
         // Initialize instance maps
-        const instanceNames = new Set(result.allocations.map(a => a.instance).filter(Boolean));
+        const instanceNames = new Set(allocs.map(a => a.instance).filter(Boolean));
         instanceNames.forEach(name => {
             if (name) newInstances[name] = {};
         });
 
         // Populate maps
-        result.allocations.forEach(alloc => {
+        allocs.forEach(alloc => {
             const cpuStr = String(alloc.coreId);
 
             // Physical map (all roles)
@@ -90,12 +86,30 @@ export function AutoOptimize() {
                 newInstances[alloc.instance][cpuStr].push(alloc.role);
             }
         });
+        return newInstances;
+    };
+
+    const handleApply = () => {
+        if (!result) return;
+
+        // 1. Save current state as previous (for Ghost Diff)
+        setPreviousInstances(instances);
+
+        // 2. Convert allocations to InstanceConfig
+        const newInstances = allocationsToConfig(result.allocations);
 
         // 3. Apply changes
         setInstances(newInstances);
         setIsolatedCores(result.isolatedCores);
 
         alert('Optimization applied! Previous state saved for comparison.');
+    };
+
+    const handleExport = () => {
+        if (!result) return;
+        const conf = allocationsToConfig(result.allocations);
+        const yaml = exportToBender(conf, result.isolatedCores);
+        downloadYaml(`${serverName || 'server'}_optimized.yaml`, yaml);
     };
 
     if (!hasData) {
@@ -158,6 +172,23 @@ export function AutoOptimize() {
                             }}
                         >
                             Apply Strategy
+                        </button>
+                    )}
+
+                    {result && (
+                        <button
+                            onClick={handleExport}
+                            style={{
+                                padding: '8px 16px',
+                                background: 'transparent',
+                                border: '1px solid var(--text-muted)',
+                                color: 'var(--text-main)',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: 600
+                            }}
+                        >
+                            Export YAML
                         </button>
                     )}
                 </div>
