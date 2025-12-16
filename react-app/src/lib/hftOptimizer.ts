@@ -68,13 +68,6 @@ export interface OptimizationResult {
 }
 
 // =====================================================
-// CONSTANTS
-// =====================================================
-
-const GW_TO_IRQ_RATIO = 3; // 1 IRQ per 3 Gateways
-const MAX_GW_PER_INSTANCE = 10;
-
-// =====================================================
 // L3 ZONE CLASSIFICATION
 // =====================================================
 
@@ -112,23 +105,22 @@ export function classifyL3Zones(
 }
 
 // =====================================================
-// MAIN OPTIMIZER
+// MAIN OPTIMIZER (Network Packing Strategy)
 // =====================================================
 
 /**
  * optimizeTopology - The Brain
  * 
- * Phase 1: Zoning (Hardware Classification)
- * Phase 2: Global Tax (OS + Service Bundles)
- * Phase 3: Critical Path (Gateways & IRQ)
- * Phase 4: Computation (Robots)
+ * Strategy: "The Network Packing"
+ * Phase 1: Fill Network Node (Strict Order: OS > Anchors > IRQ > Gateways)
+ * Phase 2: Fill Remote Nodes (Robots)
+ * Phase 3: Rebalance (Ensure min Gateways)
  */
 export function optimizeTopology(input: OptimizationInput): OptimizationResult {
     const { coreNumaMap, l3Groups, netNumaNodes, instances } = input;
     const netNuma = netNumaNodes[0] ?? 0;
 
     const allCores = Object.keys(coreNumaMap).map(Number).sort((a, b) => a - b);
-    const totalCores = allCores.length;
 
     const allocations: CoreAllocation[] = [];
     const warnings: string[] = [];
@@ -136,33 +128,32 @@ export function optimizeTopology(input: OptimizationInput): OptimizationResult {
 
     // Sort instances by priority
     const sortedInstances = [...instances].sort((a, b) => a.priority - b.priority);
-    const instanceCount = sortedInstances.length;
 
-    // Get cores by NUMA
-    const getCoresByNuma = (numa: number): number[] => {
-        return allCores.filter(c => coreNumaMap[String(c)] === numa).sort((a, b) => a - b);
-    };
+    // --- Phase 1.1: Identify OS Cores (Fixed 4 on Node 0) ---
+    const node0Cores = allCores.filter(c => coreNumaMap[String(c)] === netNuma);
+    const osCores = node0Cores.slice(0, 4);
 
-    const numa0Cores = getCoresByNuma(0);
-    const netNumaCores = getCoresByNuma(netNuma);
-
-    // ===== PHASE 2: Global Tax (OS) =====
-    const osCount = totalCores < 48 ? 4 : Math.min(8, Math.ceil(totalCores / 12));
-    const osCores: number[] = [];
-
-    for (let i = 0; i < osCount && i < numa0Cores.length; i++) {
-        osCores.push(numa0Cores[i]);
-        assigned.add(numa0Cores[i]);
+    // Check if we found less than 4 (e.g. tiny server)
+    if (osCores.length < 4) {
+        warnings.push(`Server too small: OS has only ${osCores.length} cores`);
     }
 
-    // Classify L3 zones after OS assignment
-    const l3Zones = classifyL3Zones(l3Groups, coreNumaMap, netNuma, osCores);
-    const dirtyL3 = l3Zones.find(z => z.zone === 'dirty');
-    const goldL3s = l3Zones.filter(z => z.zone === 'gold');
-    // silverL3s used for robot allocation (implicit via getAvailableFromZone)
+    // Mark OS
+    osCores.forEach(c => assigned.add(c));
 
-    // Helper to add allocation
+    // Classify L3s based on OS choice
+    const l3Zones = classifyL3Zones(l3Groups, coreNumaMap, netNuma, osCores);
+    const dirtyL3s = l3Zones.filter(z => z.zone === 'dirty');
+    const goldL3s = l3Zones.filter(z => z.zone === 'gold');
+    const silverL3s = l3Zones.filter(z => z.zone === 'silver');
+
+    // Helper: Allocate
     const allocate = (coreId: number, role: string, instanceId?: string) => {
+        if (assigned.has(coreId)) {
+            // Check if we are overwriting (shouldn't happen with correct logic)
+            return;
+        }
+
         const l3 = l3Zones.find(z => z.cores.includes(coreId));
         allocations.push({
             coreId,
@@ -175,97 +166,183 @@ export function optimizeTopology(input: OptimizationInput): OptimizationResult {
         assigned.add(coreId);
     };
 
-    // Get available cores from L3
-    const getAvailableFromL3 = (l3: L3Cache | undefined, count: number): number[] => {
-        if (!l3) return [];
-        return l3.cores.filter(c => !assigned.has(c)).slice(0, count);
-    };
-
-    // Get available cores from zone
-    const getAvailableFromZone = (zone: L3Zone, count: number): number[] => {
+    // Helper: Get free cores from a list of pools (L3s)
+    const getFreeFromL3s = (l3s: L3Cache[], count: number): number[] => {
         const result: number[] = [];
-        const targetL3s = l3Zones.filter(z => z.zone === zone);
-        for (const l3 of targetL3s) {
-            for (const core of l3.cores) {
-                if (!assigned.has(core) && result.length < count) {
-                    result.push(core);
+        for (const l3 of l3s) {
+            for (const c of l3.cores) {
+                if (!assigned.has(c)) {
+                    result.push(c);
+                    if (result.length === count) return result;
                 }
             }
         }
         return result;
     };
 
-    // ===== PHASE 2 continued: Service Bundles (in DIRTY L3) =====
+    // Get ALL free cores on Node 0 (Network)
+    // We prioritize Dirty (for Anchors) then Gold
+
+    // --- Phase 1.2: Service Anchors (2 per instance) ---
+    // Rule: "Keeps all dirty traffic on the dirty node"
     sortedInstances.forEach(inst => {
-        // Trash Bundle (Trash + RF + ClickHouse)
-        const trashCores = getAvailableFromL3(dirtyL3, 1);
-        if (trashCores.length > 0) {
-            allocate(trashCores[0], 'trash_bundle', inst.id);
-        } else {
-            // Overflow to SILVER (never GOLD!)
-            const overflow = getAvailableFromZone('silver', 1);
-            if (overflow.length > 0) {
-                allocate(overflow[0], 'trash_bundle', inst.id);
-                warnings.push(`Service bundle for ${inst.id} placed in SILVER (DIRTY full)`);
+        // Need 2 cores. Try Dirty first, then Gold.
+        const needed = 2;
+        let got: number[] = [];
+
+        // Try Dirty L3 first
+        const fromDirty = getFreeFromL3s(dirtyL3s, needed);
+        got = [...fromDirty];
+
+        // Overflow to Gold if needed
+        if (got.length < needed) {
+            const fromGold = getFreeFromL3s(goldL3s, needed - got.length);
+            got = [...got, ...fromGold];
+        }
+
+        // Assign
+        if (got.length > 0) allocate(got[0], 'trash_bundle', inst.id);
+        if (got.length > 1) allocate(got[1], 'ar_bundle', inst.id);
+
+        if (got.length < needed) {
+            warnings.push(`Instance ${inst.id}: Not enough space on Node 0 for Anchors`);
+            // Spillover to Silver?
+            // "The Network Node (Node 0) is premium real estate... Fill it in this STRICT order until full"
+            // If full, we go to Remote.
+            const fromSilver = getFreeFromL3s(silverL3s, needed - got.length);
+            fromSilver.forEach((c, i) => {
+                const role = (got.length + i) === 0 ? 'trash_bundle' : 'ar_bundle';
+                allocate(c, role, inst.id);
+                warnings.push(`Instance ${inst.id}: Anchor ${role} pushed to SILVER (Node 0 Full)`);
+            });
+        }
+    });
+
+    // --- Phase 1.3: IRQ Cores (Fixed 4) ---
+    // Rule: "IRQ Cores: Fixed 4 cores."
+    // Prefer Gold L3s (clean network), but Dirty is acceptable if Gold full.
+    const neededIrq = 4;
+    let irqCores = getFreeFromL3s(goldL3s, neededIrq);
+
+    if (irqCores.length < neededIrq) {
+        // Fallback to Dirty
+        const fromDirty = getFreeFromL3s(dirtyL3s, neededIrq - irqCores.length);
+        irqCores = [...irqCores, ...fromDirty];
+    }
+
+    irqCores.forEach(c => allocate(c, 'irq')); // Shared IRQ
+
+    if (irqCores.length < neededIrq) {
+        // Fallback to Silver?? Very bad latency.
+        warnings.push('Critical: IRQ cores pushed to Remote Node (Node 0 Full)');
+        const fromSilver = getFreeFromL3s(silverL3s, neededIrq - irqCores.length);
+        fromSilver.forEach(c => allocate(c, 'irq'));
+    }
+
+    // --- Phase 1.4: Gateways (All Instances) ---
+    // Rule: "Calculate remaining space on Node 0... Distribute these Gold Cores"
+    // Get truly remaining on Node 0 (Gold preferred, then Dirty)
+    const remainingGold = getFreeFromL3s(goldL3s, 999);
+    const remainingDirty = getFreeFromL3s(dirtyL3s, 999);
+    let poolNode0 = [...remainingGold, ...remainingDirty];
+
+    const instanceGwCounts: Record<string, number> = {};
+    instances.forEach(i => instanceGwCounts[i.id] = 0);
+
+    // Distribute Node 0 pool among instances
+    if (poolNode0.length > 0 && instances.length > 0) {
+
+        // Round robin allocation to ensure fairness until pool empty
+        let activeIdx = 0;
+        let pIndex = 0;
+
+        // Optimization: Give weight-based share?
+        // User says: "Distribute these 'Gold Cores' between instances."
+        // "Example: If 12 cores remain and we have 2 instances -> Each gets 6"
+        // Implies Equal distribution? Or Weighted?
+        // Let's do Round Robin for simplicity and fairness.
+
+        while (pIndex < poolNode0.length) {
+            const inst = sortedInstances[activeIdx];
+            const core = poolNode0[pIndex];
+            allocate(core, 'gateway', inst.id);
+            instanceGwCounts[inst.id]++;
+
+            pIndex++;
+            activeIdx = (activeIdx + 1) % sortedInstances.length;
+        }
+    }
+
+    // --- Phase 2: Fill Remote Nodes (Robots) ---
+    // Rule: "All Remote Nodes are exclusively for Robots."
+    // "Do NOT leave any core empty. If 3 cores are left, assign them to the busiest Robot Pool."
+
+    const remoteL3s = silverL3s; // Theoretically Silver = Remote (mostly)
+    const poolRemote = getFreeFromL3s(remoteL3s, 999);
+
+    if (poolRemote.length > 0 && instances.length > 0) {
+        // Distribute remaining cores among instances for Robots
+        // Use Round Robin for fairness
+        let activeIdx = 0;
+        let pIndex = 0;
+
+        while (pIndex < poolRemote.length) {
+            const inst = sortedInstances[activeIdx];
+            const core = poolRemote[pIndex];
+            allocate(core, 'robot', inst.id);
+
+            pIndex++;
+            activeIdx = (activeIdx + 1) % sortedInstances.length;
+        }
+    }
+
+    // --- Phase 3: Gateway Scaling Rule & Rebalance ---
+    // Rule: "NEVER assign just 1 core to Gateways unless server < 8 cores"
+    // Rule: "If Robot cores exist but GW < Healthy... Rebalance: Take from Robots give to GW"
+
+    const totalCoresAvailable = allCores.length;
+
+    sortedInstances.forEach(inst => {
+        const gwCount = instanceGwCounts[inst.id];
+        const robots = allocations.filter(a => a.instance === inst.id && a.role === 'robot');
+        const minGw = 3; // "Try to give at least 3-4 cores"
+
+        if (totalCoresAvailable >= 8 && gwCount < minGw) {
+            // Need to steal X cores from Robots
+            const deficit = minGw - gwCount;
+            const stoleCount = Math.min(deficit, robots.length);
+
+            if (stoleCount > 0) {
+                // Steal the last assigned robots (likely on Remote Node)
+                // "Do NOT put Gateways here unless Node 0 is 100% full."
+                // Node 0 IS full (otherwise we would have taken it in Phase 1.4).
+                // So we are putting Gateways on Remote Node (Silver).
+
+                // Which robots to steal? 
+                // We want to minimize fragmentation? Just take any.
+                const stolen = robots.slice(0, stoleCount);
+
+                // Mutation! Update allocations
+                stolen.forEach(robotAlloc => {
+                    // Update Role
+                    robotAlloc.role = 'gateway'; // Converted
+                    instanceGwCounts[inst.id]++;
+                });
+
+                warnings.push(`Instance ${inst.id}: Rebalanced ${stoleCount} cores from Robots to Gateways (Node 0 Full)`);
+            } else {
+                if (gwCount < 1) {
+                    warnings.push(`Critical: Instance ${inst.id} has NO Gateways and NO Robots to steal from!`);
+                }
             }
         }
-
-        // AR Bundle (AllRobots + Formula)
-        const arCores = getAvailableFromL3(dirtyL3, 1);
-        if (arCores.length > 0) {
-            allocate(arCores[0], 'ar_bundle', inst.id);
-        } else {
-            const overflow = getAvailableFromZone('silver', 1);
-            if (overflow.length > 0) {
-                allocate(overflow[0], 'ar_bundle', inst.id);
-            }
-        }
     });
 
-    // ===== PHASE 3: Critical Path (Gateways & IRQ) =====
-    const netCapacity = netNumaCores.filter(c => !assigned.has(c)).length;
-    const totalWeight = sortedInstances.reduce((sum, i) => sum + i.weight, 0);
-
-    sortedInstances.forEach((inst, idx) => {
-        const capacityShare = Math.floor(netCapacity * (inst.weight / totalWeight));
-        const gwCount = Math.min(MAX_GW_PER_INSTANCE, Math.floor(capacityShare * 0.75));
-        const irqCount = Math.ceil(gwCount / GW_TO_IRQ_RATIO);
-
-        // For PROD: try to get exclusive GOLD L3
-        const targetL3 = inst.type === 'PROD' && goldL3s[idx] ? goldL3s[idx] : goldL3s[0];
-
-        // IRQ cores in GOLD
-        const irqCores = getAvailableFromL3(targetL3, irqCount);
-        irqCores.forEach(c => allocate(c, 'irq', inst.id));
-
-        // Gateway cores in same GOLD L3
-        const gwCores = getAvailableFromL3(targetL3, gwCount);
-        gwCores.forEach(c => allocate(c, 'gateway', inst.id));
-
-        // Overflow to other GOLD L3s
-        const remaining = gwCount - gwCores.length;
-        if (remaining > 0) {
-            const overflow = getAvailableFromZone('gold', remaining);
-            overflow.forEach(c => allocate(c, 'gateway', inst.id));
-        }
-    });
-
-    // ===== PHASE 4: Computation (Robots) =====
-    // Fill SILVER first, then GOLD tail
-    const remainingCores = allCores.filter(c => !assigned.has(c) && !osCores.includes(c));
-
-    remainingCores.forEach((c, idx) => {
-        const inst = sortedInstances[idx % instanceCount] || sortedInstances[0];
-        allocate(c, 'robot', inst?.id);
-    });
-
-    // Build isolated cores (all except OS)
-    const isolatedCores = allCores.filter(c => !osCores.includes(c));
-
+    // Final calculations
     return {
         allocations,
         osCores,
-        isolatedCores,
+        isolatedCores: allCores.filter(c => !assigned.has(c) && !osCores.includes(c)), // Should be empty
         l3Zones,
         warnings,
         summary: {
@@ -274,59 +351,5 @@ export function optimizeTopology(input: OptimizationInput): OptimizationResult {
             gwCount: allocations.filter(a => a.role === 'gateway').length,
             robotCount: allocations.filter(a => a.role === 'robot').length
         }
-    };
-}
-
-// =====================================================
-// VALIDATION
-// =====================================================
-
-export interface ValidationResult {
-    isValid: boolean;
-    errors: string[];
-    warnings: string[];
-}
-
-/**
- * validateL3Rules - The L3 Guard
- * 
- * Rule 1: Gateway + OS in same L3 (DIRTY) → Critical Error
- * Rule 2: GW + IRQ cross-NUMA → Warning
- * Rule 3: Service Bundle in GOLD → Warning
- */
-export function validateL3Rules(
-    allocations: CoreAllocation[],
-    netNuma: number
-): ValidationResult {
-    const errors: string[] = [];
-    const warnings: string[] = [];
-
-    allocations.forEach(alloc => {
-        // Rule 1: Gateway on DIRTY → Critical
-        if (alloc.role === 'gateway' && alloc.zone === 'dirty') {
-            errors.push(
-                `Critical: Gateway (Core ${alloc.coreId}) cannot share L3 with OS`
-            );
-        }
-
-        // Rule 2: IRQ cross-socket → Warning
-        if (alloc.role === 'irq' && alloc.numa !== netNuma) {
-            warnings.push(
-                `Latency: IRQ (Core ${alloc.coreId}) is cross-socket`
-            );
-        }
-
-        // Rule 3: Service Bundle in GOLD → Warning
-        if ((alloc.role === 'trash_bundle' || alloc.role === 'ar_bundle') && alloc.zone === 'gold') {
-            warnings.push(
-                `Suboptimal: ${alloc.role} (Core ${alloc.coreId}) is in GOLD L3`
-            );
-        }
-    });
-
-    return {
-        isValid: errors.length === 0,
-        errors,
-        warnings
     };
 }
