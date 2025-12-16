@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { InputPanel } from './InputPanel';
 import { TopologyMap } from './TopologyMap';
 import { ConfigOutput } from './ConfigOutput';
+import { ValidationPanel } from './ValidationPanel';
 import { useAppStore } from '../store/appStore';
 import { ROLES } from '../types/topology';
 
@@ -111,11 +112,32 @@ function TagsLegend() {
             <div style={{
                 fontSize: '10px',
                 color: 'var(--text-muted)',
-                marginTop: 'auto',
+                marginTop: '8px',
+                paddingTop: '8px',
+                borderTop: '1px solid var(--border-color)',
                 lineHeight: 1.5
             }}>
                 Click = paint core<br />
                 Ctrl+Click = erase
+            </div>
+
+            {/* Validation Panel */}
+            <div style={{
+                marginTop: '16px',
+                paddingTop: '16px',
+                borderTop: '1px solid var(--border-color)'
+            }}>
+                <div style={{
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: 'var(--text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                    marginBottom: '12px'
+                }}>
+                    L3 Guard
+                </div>
+                <ValidationPanel />
             </div>
         </div>
     );
