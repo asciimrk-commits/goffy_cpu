@@ -150,7 +150,8 @@ const HFT = {
         this.state = {
             serverName: '', geometry: {}, coreNumaMap: {}, l3Groups: {},
             netNumaNodes: new Set(), isolatedCores: new Set(), coreIRQMap: {},
-            cpuLoadMap: {}, instances: { Physical: {} }, networkInterfaces: []
+            cpuLoadMap: {}, instances: { Physical: {} }, networkInterfaces: [],
+            coreBenderMap: {}
         };
 
         const lines = text.split('\n');
@@ -274,9 +275,17 @@ const HFT = {
 
                     // Извлекаем роли
                     Object.entries(ROLE_MAP).forEach(([key, role]) => {
-                        const pattern = new RegExp(key + '[:\\s]*\\[', 'i');
-                        if (pattern.test(line)) {
+                        // Match key:[val1,val2] or key: [val]
+                        const pattern = new RegExp(key + '[:\\s]*\\[([^\\]]*)\\]', 'i');
+                        const match = line.match(pattern);
+                        if (match) {
                             benderCpuInfo[cpu].roles.push(role);
+                            // Store the content inside brackets (e.g. "OMM0" from "[OMM0]")
+                            // If multiple values "OMM0,OMM1", keep them as is
+                            const serverName = match[1].trim();
+                            if (serverName) {
+                                this.state.coreBenderMap[cpu] = serverName;
+                            }
                         }
                     });
 
@@ -582,6 +591,11 @@ const HFT = {
                 if (role) html += `<div class="tooltip-role"><div class="tooltip-swatch" style="background:${role.color}"></div>${role.name}</div>`;
             });
             html += '</div>';
+        }
+
+        // Bender Source
+        if (this.state.coreBenderMap[cpu]) {
+            html += `<div class="tooltip-bender">Bender: ${this.state.coreBenderMap[cpu]}</div>`;
         }
 
         tooltip.innerHTML = html;
