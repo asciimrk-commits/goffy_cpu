@@ -305,3 +305,4 @@ const HFT_RULES = {
 };
 
 if (typeof window !== 'undefined') window.HFT_RULES = HFT_RULES;
+if (typeof module !== 'undefined') module.exports = HFT_RULES;
