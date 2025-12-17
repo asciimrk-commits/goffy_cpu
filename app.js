@@ -151,7 +151,7 @@ const HFT = {
             serverName: '', geometry: {}, coreNumaMap: {}, l3Groups: {},
             netNumaNodes: new Set(), isolatedCores: new Set(), coreIRQMap: {},
             cpuLoadMap: {}, instances: { Physical: {} }, networkInterfaces: [],
-            coreBenderMap: {}
+            coreBenderMap: {}, instanceToInterface: {}
         };
 
         const lines = text.split('\n');
@@ -251,7 +251,15 @@ const HFT = {
                 if (line.startsWith('IF:')) {
                     const parts = {};
                     line.split('|').forEach(p => { const [k, v] = p.split(':'); parts[k] = v; });
-                    if (parts.NUMA && parts.NUMA !== '-1') this.state.netNumaNodes.add(parts.NUMA);
+                    if (parts.NUMA && parts.NUMA !== '-1') {
+                        this.state.netNumaNodes.add(parts.NUMA);
+                    }
+                    if (parts.IF) {
+                        this.state.networkInterfaces.push({
+                            name: parts.IF,
+                            numaNode: parseInt(parts.NUMA || 0)
+                        });
+                    }
                 }
             }
 
@@ -279,10 +287,14 @@ const HFT = {
                         const pattern = new RegExp(key + '[:\\s]*\\[([^\\]]*)\\]', 'i');
                         const match = line.match(pattern);
                         if (match) {
-                            benderCpuInfo[cpu].roles.push(role);
-                            // Store the content inside brackets (e.g. "OMM0" from "[OMM0]")
-                            // If multiple values "OMM0,OMM1", keep them as is
+                            // Store role with its associated instance
                             const serverName = match[1].trim();
+                            benderCpuInfo[cpu].roles.push({
+                                id: role,
+                                instance: serverName
+                            });
+
+                            // Store primary instance for this core
                             if (serverName) {
                                 this.state.coreBenderMap[cpu] = serverName;
                             }
@@ -333,6 +345,12 @@ const HFT = {
         Object.entries(benderCpuInfo).forEach(([cpu, info]) => {
             // IRQ ядра: net_cpu:True ИЛИ в списке BENDER_NET
             if (info.net_cpu || benderNetCpus.has(cpu)) {
+                // If the core has a known instance (from other roles), use it. Otherwise 'Physical'.
+                // Often IRQ cores are shared or belong to network stack, 'Physical' is fine for visual
+                // But if they have instance mapping in Bender, use it.
+                // However, parsing logic below handles roles. IRQ is a special role.
+                // We'll assign to 'Physical' for now as it's often system-wide or we don't know yet which instance owns 'net0'.
+                // If we extracted net_cpu:[net0], we might map net0 to instances later.
                 this.addTag('Physical', cpu, 'net_irq');
                 const numa = this.state.coreNumaMap[cpu];
                 if (numa) this.state.netNumaNodes.add(numa);
@@ -343,9 +361,16 @@ const HFT = {
                 this.addTag('Physical', cpu, 'sys_os');
             }
 
-            // Применяем роли
-            info.roles.forEach(role => {
-                this.addTag('Physical', cpu, role);
+            // Применяем роли (role is now object {id, instance})
+            info.roles.forEach(roleObj => {
+                const instanceName = roleObj.instance || 'Physical';
+                // Also ensure core is added to Physical for backward compatibility/global view if needed
+                // But our visualizer aggregates all instances so we just add to specific instance
+                this.addTag(instanceName, cpu, roleObj.id);
+
+                // Also add to Physical as 'active' core marker if needed?
+                // The current visualizer iterates all keys in this.state.instances.
+                // If we add to 'OMM0', getDisplayTags will find it.
             });
         });
 
@@ -1517,14 +1542,176 @@ const HFT = {
             return;
         }
 
-        // Use HFT_RULES (already updated with NEW optimization logic)
-        // CPUOptimizer expects different data format - disabled for now
-        const result = HFT_RULES.generateRecommendation(this.state);
+        try {
+            // Adapter: Convert state to Optimizer Snapshot
+            const snapshot = this.createOptimizerSnapshot();
 
-        this.proposedConfig = result.proposedConfig;
+            // Optimize
+            const result = CPU_OPTIMIZER.optimize(snapshot);
+            this.proposedConfig = result; // Store full result for apply
 
-        output.innerHTML = result.html;
-        btnApply.disabled = !result.proposedConfig;
+            // Render
+            const html = this.renderOptimizationResults(result);
+            output.innerHTML = html;
+            btnApply.disabled = false;
+        } catch (e) {
+            console.error(e);
+            output.innerHTML = `<div class="val-error">Error during optimization: ${e.message}</div>`;
+        }
+    },
+
+    createOptimizerSnapshot() {
+        const s = this.state;
+        const topology = [];
+
+        // Build topology from geometry (hierarchical)
+        Object.entries(s.geometry).forEach(([socketId, numaData]) => {
+            Object.entries(numaData).forEach(([numaId, l3Data]) => {
+                Object.entries(l3Data).forEach(([l3Id, cores]) => {
+                    cores.forEach(cpu => {
+                        const cpuStr = String(cpu);
+                        const services = [];
+                        const load = parseFloat(s.cpuLoadMap[cpuStr] || 0);
+
+                        // Find services on this core across all instances
+                        Object.entries(s.instances).forEach(([instName, coreMap]) => {
+                            if (coreMap[cpuStr]) {
+                                coreMap[cpuStr].forEach(roleId => {
+                                    // Map roleId to Optimizer Service Name
+                                    // 'gateway' -> 'Gateway', etc.
+                                    let svcName = null;
+                                    const r = HFT_RULES.roles[roleId];
+                                    if (!r) return;
+
+                                    // Manual mapping or based on role props
+                                    if (roleId === 'gateway') svcName = 'Gateway';
+                                    else if (roleId.includes('robot') || roleId.includes('pool')) svcName = 'Robot';
+                                    else if (roleId === 'trash') svcName = 'Trash';
+                                    else if (roleId === 'udp') svcName = 'UDP';
+                                    else if (roleId === 'ar') svcName = 'AR';
+                                    else if (roleId === 'rf') svcName = 'RF';
+                                    else if (roleId === 'formula') svcName = 'Formula';
+                                    else if (roleId === 'click') svcName = 'ClickHouse';
+                                    else if (roleId === 'net_irq') svcName = 'IRQ';
+                                    else if (roleId === 'sys_os') svcName = 'System';
+
+                                    if (svcName) {
+                                        services.push({
+                                            name: svcName,
+                                            instanceId: instName === 'Physical' ? 'SYSTEM' : instName,
+                                            currentCoreIds: [parseInt(cpu)] // Identify this core belongs to service
+                                        });
+                                    }
+                                });
+                            }
+                        });
+
+                        topology.push({
+                            id: parseInt(cpu),
+                            socketId: parseInt(socketId),
+                            numaNodeId: parseInt(numaId),
+                            l3CacheId: parseInt(l3Id),
+                            currentLoad: load,
+                            services: services
+                        });
+                    });
+                });
+            });
+        });
+
+        return {
+            topology: topology,
+            network: s.networkInterfaces.map(n => ({ name: n.name, numaNode: n.numaNode })),
+            instanceToInterface: s.instanceToInterface || {},
+            interfaceNumaMap: s.networkInterfaces.reduce((acc, n) => { acc[n.name] = n.numaNode; return acc; }, {})
+        };
+    },
+
+    renderOptimizationResults(result) {
+        let html = '<div class="opt-results">';
+
+        // Header Stats
+        html += `<div class="opt-stats">
+            <div class="opt-stat-item"><span>Total Cores</span><strong>${result.totalCores}</strong></div>
+            <div class="opt-stat-item"><span>OS Cores</span><strong>${result.osCores}</strong></div>
+            <div class="opt-stat-item"><span>IRQ Cores</span><strong>${result.irqCores}</strong></div>
+        </div>`;
+
+        // Instances breakdown
+        result.instances.forEach(inst => {
+            const isAllocated = inst.allocatedCores > 0;
+            const score = inst.totalScore || 0;
+
+            html += `<div class="opt-instance">
+                <div class="opt-inst-header">
+                    <h3>${inst.instanceId}</h3>
+                    <div class="opt-inst-score">Score: ${score}</div>
+                </div>
+                <div class="opt-inst-details">
+                    <div>Allocated: <strong>${inst.allocatedCores}</strong> cores</div>
+                    <div>Needs: GW:${inst.gateway} | Rob:${inst.robot}</div>
+                </div>`;
+
+            // Placement details
+            if (inst.numaPlacement && inst.numaPlacement.breakdown) {
+                html += `<div class="opt-placement">`;
+                Object.values(inst.numaPlacement.breakdown).forEach(bd => {
+                    const type = bd.isNetwork ? 'Network' : 'Remote';
+                    html += `<div class="opt-numa-bd ${bd.isNetwork ? 'is-net' : ''}">
+                        NUMA ${bd.numaId} (${type}): ${bd.services.join(', ')} <span class="badge">${bd.totalScore} pts</span>
+                    </div>`;
+                });
+                html += `</div>`;
+            }
+
+            // Assigned Cores
+            if (inst.coreAssignments) {
+                html += `<div class="opt-cores-list">`;
+                inst.coreAssignments.forEach(assign => {
+                    const coresStr = this.formatCoreRange(assign.cores);
+                    const svc = assign.service.toLowerCase();
+                    let roleId = 'sys_os';
+
+                    if (svc === 'gateway') roleId = 'gateway';
+                    else if (svc === 'robot') roleId = 'robot_default';
+                    else if (svc === 'trash') roleId = 'trash';
+                    else if (svc === 'udp') roleId = 'udp';
+                    else if (svc === 'ar') roleId = 'ar';
+                    else if (svc === 'rf') roleId = 'rf';
+                    else if (svc === 'formula') roleId = 'formula';
+                    else if (svc === 'click') roleId = 'click'; // clickhouse maps to click
+                    else if (svc === 'clickhouse') roleId = 'click';
+                    else if (svc === 'irq') roleId = 'net_irq';
+                    else if (svc === 'os') roleId = 'sys_os';
+
+                    const roleColor = HFT_RULES.roles[roleId]?.color || '#888';
+
+                    html += `<div class="opt-core-group" style="border-left: 3px solid ${roleColor}">
+                        <span class="opt-svc-name">${assign.service}</span>
+                        <span class="opt-svc-cores">${coresStr}</span>
+                    </div>`;
+                });
+                html += `</div>`;
+            }
+
+            html += `</div>`;
+        });
+
+        // Global Recommendations
+        if (result.recommendations && result.recommendations.length > 0) {
+            html += `<div class="opt-recs"><h3>Recommendations</h3>`;
+            result.recommendations.forEach(rec => {
+                rec.changes.forEach(change => {
+                    html += `<div class="opt-rec-item ${rec.priorities.includes('critical') ? 'critical' : ''}">
+                        <strong>${rec.instanceId}</strong>: ${change.service} - ${change.reason}
+                    </div>`;
+                });
+            });
+            html += `</div>`;
+        }
+
+        html += '</div>';
+        return html;
     },
 
     applyRecommendation() {
@@ -1533,10 +1720,46 @@ const HFT = {
         // Clear existing roles
         this.state.instances = { Physical: {} };
 
-        // Apply proposed config
-        Object.entries(this.proposedConfig.instances?.Physical || {}).forEach(([cpu, roles]) => {
-            if (!this.state.instances.Physical[cpu]) this.state.instances.Physical[cpu] = new Set();
-            roles.forEach(role => this.state.instances.Physical[cpu].add(role));
+        // Apply new config
+        this.proposedConfig.instances.forEach(instPlan => {
+            const instName = instPlan.instanceId;
+            if (instName === 'SYSTEM') return; // Don't create separate instance for SYSTEM (usually mapped to Physical)
+
+            if (!this.state.instances[instName]) this.state.instances[instName] = {};
+
+            if (instPlan.coreAssignments) {
+                instPlan.coreAssignments.forEach(assign => {
+                    // Map Service Name to Role ID
+                    let roleId = null;
+                    const svc = assign.service.toLowerCase();
+                    if (svc === 'gateway') roleId = 'gateway';
+                    else if (svc === 'robot') roleId = 'robot_default';
+                    else if (svc === 'trash') roleId = 'trash';
+                    else if (svc === 'udp') roleId = 'udp';
+                    else if (svc === 'ar') roleId = 'ar';
+                    else if (svc === 'rf') roleId = 'rf';
+                    else if (svc === 'formula') roleId = 'formula';
+                    else if (svc === 'clickhouse' || svc === 'click') roleId = 'click';
+                    else if (svc === 'system' || svc === 'os') roleId = 'sys_os';
+                    else if (svc === 'irq') roleId = 'net_irq';
+
+                    if (roleId) {
+                        assign.cores.forEach(cpu => {
+                            const cpuStr = String(cpu);
+                            // For Robot: check NUMA to assign pool1/pool2
+                            if (roleId === 'robot_default') {
+                                if (this.state.isolatedCores.has(cpuStr)) {
+                                    this.addTag(instName, cpuStr, 'isolated_robots');
+                                } else {
+                                    this.addTag(instName, cpuStr, 'robot_default');
+                                }
+                            } else {
+                                this.addTag(instName, cpuStr, roleId);
+                            }
+                        });
+                    }
+                });
+            }
         });
 
         this.renderBlueprint();
