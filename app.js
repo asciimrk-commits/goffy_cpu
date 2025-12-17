@@ -181,7 +181,7 @@ const HFT = {
             if (!line) continue;
 
             // Section detection
-            if (line === '@@HFT_CPU_MAP_V4@@') { mode = 'v4'; continue; }
+            if (line === '@@HFT_CPU_MAP_V4@@' || line === '@@HFT_CPU_MAP_V5@@') { mode = 'v4'; continue; }
             if (line.startsWith('@@') && line.endsWith('@@')) {
                 mode = line.replace(/@@/g, '').toLowerCase();
                 continue;
@@ -1633,7 +1633,7 @@ const HFT = {
         // Header Stats
         html += `<div class="opt-stats">
             <div class="opt-stat-item"><span>Total Cores</span><strong>${result.totalCores}</strong></div>
-            <div class="opt-stat-item"><span>OS Cores</span><strong>${result.osCores}</strong></div>
+            <div class="opt-stat-item"><span>OS Cores</span><strong>${result.osCores.length}</strong></div>
             <div class="opt-stat-item"><span>IRQ Cores</span><strong>${result.irqCores}</strong></div>
         </div>`;
 
@@ -1658,7 +1658,7 @@ const HFT = {
                 Object.values(inst.numaPlacement.breakdown).forEach(bd => {
                     const type = bd.isNetwork ? 'Network' : 'Remote';
                     html += `<div class="opt-numa-bd ${bd.isNetwork ? 'is-net' : ''}">
-                        NUMA ${bd.numaId} (${type}): ${bd.services.join(', ')} <span class="badge">${bd.totalScore} pts</span>
+                        NUMA ${bd.numaId} (${type}): ${bd.services.join(', ')}
                     </div>`;
                 });
                 html += `</div>`;
@@ -1674,9 +1674,9 @@ const HFT = {
 
                     if (svc === 'gateway') roleId = 'gateway';
                     else if (svc === 'robot') roleId = 'robot_default';
-                    else if (svc === 'trash') roleId = 'trash';
+                    else if (svc === 'trash' || svc === 'trash_combo') roleId = 'trash';
                     else if (svc === 'udp') roleId = 'udp';
-                    else if (svc === 'ar') roleId = 'ar';
+                    else if (svc === 'ar' || svc === 'ar_combo') roleId = 'ar';
                     else if (svc === 'rf') roleId = 'rf';
                     else if (svc === 'formula') roleId = 'formula';
                     else if (svc === 'click') roleId = 'click'; // clickhouse maps to click
@@ -1719,43 +1719,59 @@ const HFT = {
 
         // Clear existing roles
         this.state.instances = { Physical: {} };
+        this.state.isolatedCores.clear(); // Clear isolation
 
         // Apply new config
+        // First, mark all OS cores (implicitly 0-N)
+        // Actually, we should set isolated=true for all NON-OS cores first?
+        // Or just set isolated=true based on assignments.
+        // Logic: cores 0-N are OS, everything else is Isolated.
+        // Wait, optimizer returns strict OS set.
+        const osSet = new Set(this.proposedConfig.osCores.map(c => String(c)));
+        const allCores = Object.keys(this.state.coreNumaMap);
+
+        allCores.forEach(cpu => {
+            if (!osSet.has(String(cpu))) {
+                this.state.isolatedCores.add(String(cpu));
+            }
+        });
+
         this.proposedConfig.instances.forEach(instPlan => {
             const instName = instPlan.instanceId;
-            if (instName === 'SYSTEM') return; // Don't create separate instance for SYSTEM (usually mapped to Physical)
+            // if (instName === 'SYSTEM') return; // SYSTEM tasks handled separately?
 
-            if (!this.state.instances[instName]) this.state.instances[instName] = {};
+            // SYSTEM tasks usually map to Physical or just IRQ
+            const targetInst = instName === 'SYSTEM' ? 'Physical' : instName;
+            if (!this.state.instances[targetInst]) this.state.instances[targetInst] = {};
 
             if (instPlan.coreAssignments) {
                 instPlan.coreAssignments.forEach(assign => {
                     // Map Service Name to Role ID
                     let roleId = null;
                     const svc = assign.service.toLowerCase();
-                    if (svc === 'gateway') roleId = 'gateway';
-                    else if (svc === 'robot') roleId = 'robot_default';
-                    else if (svc === 'trash') roleId = 'trash';
-                    else if (svc === 'udp') roleId = 'udp';
-                    else if (svc === 'ar') roleId = 'ar';
-                    else if (svc === 'rf') roleId = 'rf';
-                    else if (svc === 'formula') roleId = 'formula';
-                    else if (svc === 'clickhouse' || svc === 'click') roleId = 'click';
-                    else if (svc === 'system' || svc === 'os') roleId = 'sys_os';
-                    else if (svc === 'irq') roleId = 'net_irq';
+                    const rolesToApply = [];
 
-                    if (roleId) {
+                    if (svc === 'gateway') rolesToApply.push('gateway');
+                    else if (svc === 'robot') {
+                        rolesToApply.push('robot_default'); // Default, specific pools logic removed for simplicity or handled by optimizer tiering
+                    }
+                    else if (svc === 'trash_combo') {
+                         rolesToApply.push('trash');
+                         rolesToApply.push('click');
+                         rolesToApply.push('rf');
+                    }
+                    else if (svc === 'ar_combo') {
+                        rolesToApply.push('ar');
+                        rolesToApply.push('formula');
+                    }
+                    else if (svc === 'udp') rolesToApply.push('udp');
+                    else if (svc === 'irq') rolesToApply.push('net_irq');
+
+                    // Apply all roles
+                    if (rolesToApply.length > 0) {
                         assign.cores.forEach(cpu => {
                             const cpuStr = String(cpu);
-                            // For Robot: check NUMA to assign pool1/pool2
-                            if (roleId === 'robot_default') {
-                                if (this.state.isolatedCores.has(cpuStr)) {
-                                    this.addTag(instName, cpuStr, 'isolated_robots');
-                                } else {
-                                    this.addTag(instName, cpuStr, 'robot_default');
-                                }
-                            } else {
-                                this.addTag(instName, cpuStr, roleId);
-                            }
+                            rolesToApply.forEach(r => this.addTag(targetInst, cpuStr, r));
                         });
                     }
                 });
@@ -2238,5 +2254,3 @@ ${commands.irqbalance}
 };
 
 document.addEventListener('DOMContentLoaded', () => HFT.init());
-
-

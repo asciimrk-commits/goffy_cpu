@@ -1,815 +1,423 @@
 /**
- * HFT CPU Optimizer - Capacity Planning Engine
+ * HFT CPU Optimizer - Capacity Planning Engine v5.0
  * 
  * Логика автоматической оптимизации распределения ядер между сервисами
- * на основе текущей нагрузки, топологии NUMA/L3 и правил распределения
+ * на основе текущей нагрузки, топологии NUMA/L3 и правил распределения (Scoring System)
  */
 
 const CPU_OPTIMIZER = {
-    // Система очков для NUMA placement
+    // Система очков для NUMA placement (User defined)
     NUMA_SCORES: {
-        // Иначе быть не может (+1000)
+        // Иначе быть не может (Critical Constraints)
         CRITICAL: {
             os_on_node0: 1000,
-            irq_on_network: 1000
+            irq_on_network: 1000,
+            trash_click_rf_on_network: 1000, // Треш+click+rf - всегда на сетевой
+            udp_on_network: 1000             // udp - только на сетевой
         },
-        // Супер правильно (+100)
-        EXCELLENT: {
-            trash_rf_click_on_network: 100,
-            gateway_on_network: 100,
-            udp_on_network: 100,
-            ar_formula_on_network: 100
+        // Бонусные очки (Preferences)
+        BONUS: {
+            gateway_on_network: 500,         // гейты на сетевой +500
+            ar_formula_on_network: 200,      // ar + form на сетевой +200
+            robot_sss_on_network: 100        // robot на сетевой +100 -sss+ тир роботов
         },
-        // Сойдет (промежуточные баллы)
-        ACCEPTABLE: {
-            robots_same_l3_with_gateways: 25,
-            gateway_not_on_network: 10,
-            trash_click_not_on_network: 10
+        // Штрафы (Penalty)
+        PENALTY: {
+            wrong_l3_sharing: -500 // Смешивание Hot/Cold в одном L3, если есть возможность разделить
         }
     },
 
-    // Целевые диапазоны нагрузки для каждого типа сервиса
+    // Целевые диапазоны нагрузки
     TARGET_LOADS: {
-        os: { min: 0, max: 30, target: 20 },
-        irq: { min: 0, max: 20, target: 10 },
-        gateway: { min: 15, max: 30, target: 20 },
+        os: { target: 20 },
+        irq: { target: 10 },
+        gateway: { min: 20, max: 30, target: 25 },
         robot: { min: 30, max: 50, target: 40 },
-        trash: { min: 0, max: 80, target: 60 },
-        udp: { min: 0, max: 80, target: 60 },
-        ar: { min: 0, max: 80, target: 60 },
-        rf: { min: 0, max: 80, target: 60 },
-        formula: { min: 0, max: 80, target: 60 },
-        click: { min: 0, max: 80, target: 60 }
-    },
-
-    // Минимальная конфигурация (6 ядер)
-    MIN_CONFIG: {
-        os: 1,
-        gateway: 1,
-        robot: 1,
-        trash_click_rf: 1,  // Комбо
-        ar_formula: 1,      // Комбо
-        udp: 1,
-        irq: 0  // Рассчитывается динамически
+        // Остальные сервисы по 1 ядру, нагрузка не так важна для скейлинга
     },
 
     /**
      * Главная функция оптимизации
-     * @param {Object} snapshot - Текущий snapshot сервера
-     * @returns {Object} Оптимизированная конфигурация
      */
     optimize(snapshot) {
         const totalCores = snapshot.topology.length;
         const instances = this.extractInstances(snapshot);
 
-        console.log('[Optimizer] Starting optimization', {
-            totalCores,
-            instances: instances.map(i => i.id)
-        });
+        console.log('[Optimizer] Starting optimization v5.0', { totalCores, instances: instances.length });
 
-        // 1. Рассчитать OS ядра (10% от общего количества, минимум 1)
-        const osCores = Math.max(1, Math.ceil(totalCores * 0.1));
+        // 1. OS Cores: Strictly 0 to N (10% of total)
+        // os расположены с 0го ядра по N - иначе нельзя
+        const osCount = Math.ceil(totalCores * 0.1);
+        const osCores = [];
+        for (let i = 0; i < osCount; i++) osCores.push(i);
 
-        // 2. Для каждого инстанса рассчитать необходимые ядра
-        const instancePlans = instances.map(inst =>
-            this.calculateInstanceNeeds(inst, snapshot)
-        );
+        // 2. Рассчитать потребности инстансов (Needs Calculation)
+        // Сортируем инстансы по нагрузке ("Big" -> "Small")
+        const instancePlans = instances.map(inst => this.calculateInstanceNeeds(inst, snapshot))
+                                       .sort((a, b) => b.priorityScore - a.priorityScore);
 
-        // 3. Рассчитать общее количество IRQ ядер на основе гейтов
-        const totalGatewayNeeds = instancePlans.reduce((sum, plan) => sum + plan.gateway, 0);
-        const irqCores = this.calculateIrqCores(totalGatewayNeeds);
+        // 3. Расчет IRQ (1 ядро на 4 гейта)
+        // irq - на сетевой ноде (если она не одна то на каждой в зависимости от кол-ва гейтов на ноде)
+        // Мы считаем глобально сколько нужно IRQ ядер, но при плейсменте будем пытаться разместить их на нужных нодах
+        let totalGateways = 0;
+        instancePlans.forEach(p => totalGateways += p.gateway);
+        // Min 1 IRQ if any gateways exist
+        const totalIrqNeeded = totalGateways > 0 ? Math.max(1, Math.ceil(totalGateways / 4)) : 0;
 
-        // 4. Рассчитать доступные ядра для инстансов
-        const availableForInstances = totalCores - osCores - irqCores;
+        // 4. Доступные ядра (Total - OS)
+        // IRQ ядра берутся из доступных, так как они должны быть на сетевой ноде
+        const availableCoresTotal = totalCores - osCount;
 
-        console.log('[Optimizer] Resource allocation', {
-            totalCores,
-            osCores,
-            irqCores,
-            availableForInstances
-        });
+        // 5. Распределение ядер между инстансами (Allocation)
+        const allocations = this.allocateResources(instancePlans, availableCoresTotal - totalIrqNeeded, snapshot);
 
-        // 5. Распределить ядра между инстансами
-        const allocations = this.allocateCoresBetweenInstances(
-            instancePlans,
-            availableForInstances,
-            snapshot
-        );
-
-        // 6. Оптимизация по топологии (NUMA, L3)
-        const topologyOptimized = this.optimizeByTopology(
-            allocations,
-            snapshot,
-            osCores,
-            irqCores
-        );
+        // 6. Топологическая оптимизация (Placement & Scoring)
+        const optimizedTopology = this.optimizeTopology(allocations, snapshot, osCores, totalIrqNeeded);
 
         return {
             totalCores,
             osCores,
-            irqCores,
-            instances: topologyOptimized,
-            recommendations: this.generateRecommendations(topologyOptimized, snapshot)
+            irqCores: optimizedTopology.irqCoresCount,
+            totalScore: optimizedTopology.totalScore,
+            instances: optimizedTopology.instances,
+            recommendations: this.generateRecommendations(optimizedTopology.instances, snapshot)
         };
     },
 
-    /**
-     * Извлечь инстансы из snapshot
-     */
     extractInstances(snapshot) {
-        const instanceMap = new Map();
-
-        snapshot.topology.forEach(core => {
-            core.services.forEach(service => {
-                if (service.instanceId === 'SYSTEM') return;
-
-                if (!instanceMap.has(service.instanceId)) {
-                    instanceMap.set(service.instanceId, {
-                        id: service.instanceId,
-                        services: [],
-                        cores: new Set()
-                    });
-                }
-
-                const inst = instanceMap.get(service.instanceId);
-                inst.services.push(service);
-                inst.cores.add(core.id);
+        const map = new Map();
+        snapshot.topology.forEach(c => {
+            c.services.forEach(s => {
+                if (s.instanceId === 'SYSTEM') return;
+                if (!map.has(s.instanceId)) map.set(s.instanceId, { id: s.instanceId, services: [] });
+                map.get(s.instanceId).services.push({ ...s, coreId: c.id, load: c.currentLoad });
             });
         });
-
-        return Array.from(instanceMap.values());
+        return Array.from(map.values());
     },
 
-    /**
-     * Рассчитать необходимость в ядрах для одного инстанса
-     */
-    calculateInstanceNeeds(instance, snapshot) {
-        const serviceLoads = this.aggregateServiceLoads(instance, snapshot);
+    calculateInstanceNeeds(inst, snapshot) {
+        // Агрегация нагрузки по типам
+        const loads = { gateway: { sum: 0, count: 0 }, robot: { sum: 0, count: 0 } };
+        inst.services.forEach(s => {
+            const type = this.mapServiceType(s.name);
+            if (loads[type]) { loads[type].sum += s.load || 0; loads[type].count++; }
+        });
+
+        const getAvg = (type) => loads[type].count > 0 ? loads[type].sum / loads[type].count : 0;
+        const gwLoad = getAvg('gateway');
+        const robLoad = getAvg('robot');
+        const curGw = loads.gateway.count || 1;
+        const curRob = loads.robot.count || 1;
 
         const needs = {
-            instanceId: instance.id,
-            gateway: 0,
-            robot: 0,
-            trash: 1,    // Всегда 1
-            udp: 1,      // Всегда 1
-            ar: 1,       // Всегда 1
-            rf: 1,       // Всегда 1
-            formula: 1,  // Всегда 1
-            click: 1,    // Всегда 1
-            currentLoads: serviceLoads
+            instanceId: inst.id,
+            priorityScore: gwLoad + robLoad, // Simple priority metric
+            current: { gateway: curGw, robot: curRob, gwLoad, robLoad },
+            gateway: 1, robot: 1, trash: 1, udp: 1, ar: 1, rf: 1, formula: 1, click: 1
         };
 
-        // Рассчитать необходимые ядра для гейтов
-        if (serviceLoads.gateway) {
-            const avgLoad = serviceLoads.gateway.avgLoad;
-            const currentCores = serviceLoads.gateway.cores;
+        // Scaling Logic
+        // Гейты: оценить нагрзку, если там 20-30 процентов но было увеличено кол-во роботов, нужно будет увеличить кол-во гейтов
+        // (как правило 1 гейт на 3-4 робота)
+        // Gateway load logic: target 20-30%
+        if (gwLoad > 30) needs.gateway = Math.ceil(curGw * (gwLoad / 25)); // Scale up to reach ~25%
+        else needs.gateway = Math.max(1, curGw); // Keep or min 1
 
-            if (avgLoad < this.TARGET_LOADS.gateway.min) {
-                // Слишком мало нагрузки - уменьшить
-                needs.gateway = Math.max(1, Math.floor(currentCores * 0.7));
-            } else if (avgLoad > this.TARGET_LOADS.gateway.max) {
-                // Слишком много нагрузки - увеличить
-                const targetCores = Math.ceil(currentCores * (avgLoad / this.TARGET_LOADS.gateway.target));
-                needs.gateway = targetCores;
-            } else {
-                // Нормально
-                needs.gateway = currentCores;
-            }
-        } else {
-            needs.gateway = 1; // Минимум
-        }
+        // Роботы: оцениваем нагрузку текущую, если она в районе 60-70% то нужно расчитать такое кол-во ядер, чтобы снизилась до 30-50
+        if (robLoad >= 60) needs.robot = Math.ceil(curRob * (robLoad / 40)); // Scale to ~40%
+        else needs.robot = Math.max(1, curRob);
 
-        // Рассчитать необходимые ядра для роботов
-        if (serviceLoads.robot) {
-            const avgLoad = serviceLoads.robot.avgLoad;
-            const currentCores = serviceLoads.robot.cores;
+        // Ratio Check: 1 Gate per 3-4 Robots
+        if (needs.robot / needs.gateway > 4) needs.gateway = Math.ceil(needs.robot / 3.5);
 
-            if (avgLoad >= 60 && avgLoad <= 70) {
-                // Критическая зона - нужно снизить до 30-50%
-                const targetCores = Math.ceil(currentCores * (avgLoad / this.TARGET_LOADS.robot.target));
-                needs.robot = targetCores;
-            } else if (avgLoad > 70) {
-                // Перегрузка - увеличить агрессивно
-                const targetCores = Math.ceil(currentCores * 1.5);
-                needs.robot = targetCores;
-            } else if (avgLoad < this.TARGET_LOADS.robot.min) {
-                // Недогрузка - уменьшить
-                needs.robot = Math.max(1, Math.floor(currentCores * 0.8));
-            } else {
-                // Нормально
-                needs.robot = currentCores;
-            }
-        } else {
-            needs.robot = 1; // Минимум
-        }
+        // Min Config Check: Gate-1 Robot-1 Trash/RF/Click-1 AR/Form-1 UDP-1
+        // We track distinct cores for services.
+        // Trash/RF/Click usually combined -> 1 core
+        // AR/Form usually combined -> 1 core
+        // UDP separate -> 1 core
+        needs.trash_combo = 1; // Trash + Click + RF
+        needs.ar_combo = 1;    // AR + Formula
+        needs.udp = 1;
 
-        // Проверить соотношение гейты/роботы (1 гейт на 3-4 робота)
-        const robotGatewayRatio = needs.robot / needs.gateway;
-        if (robotGatewayRatio > 4) {
-            // Нужно больше гейтов
-            needs.gateway = Math.ceil(needs.robot / 3.5);
-        }
-
-        needs.total = needs.gateway + needs.robot + needs.trash + needs.udp +
-            needs.ar + needs.rf + needs.formula + needs.click;
-
-        // Минимум - 6 ядер (без учета OS и IRQ)
-        needs.total = Math.max(6, needs.total);
+        needs.totalCoreCount = needs.gateway + needs.robot + needs.trash_combo + needs.ar_combo + needs.udp;
+        needs.totalCoreCount = Math.max(6, needs.totalCoreCount); // Min 6 stated in requirements
 
         return needs;
     },
 
-    /**
-     * Агрегировать нагрузки по сервисам для инстанса
-     */
-    aggregateServiceLoads(instance, snapshot) {
-        const loads = {};
+    allocateResources(plans, available, snapshot) {
+        // Simple allocation: First come (Big), first served.
+        // If constrained, squeeze "Small" instances?
+        // Logic: Try to satisfy everyone. If not enough, reduce Robots (lowest prio scaler) or squeeze Small.
+        // For now, we assume we have enough cores or we fill until full.
 
-        instance.services.forEach(service => {
-            const serviceType = this.mapServiceToType(service.name);
-            if (!serviceType) return;
+        let remaining = available;
+        return plans.map(p => {
+            // Calculate strictly needed
+            const allocated = { ...p, assigned: {} };
 
-            if (!loads[serviceType]) {
-                loads[serviceType] = {
-                    cores: 0,
-                    totalLoad: 0,
-                    avgLoad: 0,
-                    coreIds: []
-                };
-            }
-
-            // Найти нагрузку для этого ядра
-            const core = snapshot.topology.find(c =>
-                service.currentCoreIds.includes(c.id)
-            );
-
-            if (core) {
-                loads[serviceType].cores++;
-                loads[serviceType].totalLoad += core.currentLoad || 0;
-                loads[serviceType].coreIds.push(core.id);
-            }
-        });
-
-        // Рассчитать средние
-        Object.keys(loads).forEach(type => {
-            if (loads[type].cores > 0) {
-                loads[type].avgLoad = loads[type].totalLoad / loads[type].cores;
-            }
-        });
-
-        return loads;
-    },
-
-    /**
-     * Маппинг имени сервиса на тип
-     */
-    mapServiceToType(serviceName) {
-        const map = {
-            'Gateway': 'gateway',
-            'Robot': 'robot',
-            'Trash': 'trash',
-            'UDP': 'udp',
-            'AR': 'ar',
-            'RF': 'rf',
-            'Formula': 'formula',
-            'ClickHouse': 'click',
-            'IRQ': 'irq',
-            'System': 'os'
-        };
-        return map[serviceName];
-    },
-
-    /**
-     * Рассчитать необходимое количество IRQ ядер
-     * Правило: 1 IRQ на 4 ядра гейтов
-     */
-    calculateIrqCores(totalGatewayCores) {
-        if (totalGatewayCores <= 4) return 1;
-        return Math.ceil(totalGatewayCores / 4);
-    },
-
-    /**
-     * Распределить доступные ядра между инстансами
-     */
-    allocateCoresBetweenInstances(instancePlans, availableCores, snapshot) {
-        if (instancePlans.length === 0) return [];
-        if (instancePlans.length === 1) {
-            // Один инстанс - дать все ядра
-            return [{
-                ...instancePlans[0],
-                allocatedCores: availableCores
-            }];
-        }
-
-        // Сортировать инстансы по приоритету (более нагруженные первыми)
-        const sorted = instancePlans.sort((a, b) => {
-            const loadA = this.getInstancePriority(a);
-            const loadB = this.getInstancePriority(b);
-            return loadB - loadA;
-        });
-
-        const allocations = [];
-        let remaining = availableCores;
-
-        // Для каждого инстанса, дать необходимые ядра
-        sorted.forEach((plan, idx) => {
-            const isLast = idx === sorted.length - 1;
-
-            if (isLast) {
-                // Последнему инстансу дать то что осталось
-                allocations.push({
-                    ...plan,
-                    allocatedCores: remaining
-                });
-            } else {
-                // Дать необходимое количество
-                const needed = plan.total;
-                const allocated = Math.min(needed, remaining);
-
-                allocations.push({
-                    ...plan,
-                    allocatedCores: allocated
-                });
-
-                remaining -= allocated;
-            }
-        });
-
-        // Проверить что малому инстансу хватает
-        const smallInstance = allocations[allocations.length - 1];
-        if (smallInstance.allocatedCores < 6) {
-            console.warn('[Optimizer] Small instance has less than minimum (6 cores)');
-            // TODO: оптимизировать IRQ чтобы освободить ядра
-        }
-
-        return allocations;
-    },
-
-    /**
-     * Получить приоритет инстанса (для сортировки)
-     */
-    getInstancePriority(plan) {
-        // Приоритет = средняя нагрузка на гейты + роботы
-        let totalLoad = 0;
-        let count = 0;
-
-        if (plan.currentLoads.gateway) {
-            totalLoad += plan.currentLoads.gateway.avgLoad;
-            count++;
-        }
-        if (plan.currentLoads.robot) {
-            totalLoad += plan.currentLoads.robot.avgLoad;
-            count++;
-        }
-
-        return count > 0 ? totalLoad / count : 0;
-    },
-
-    /**
-     * Оптимизация по топологии (NUMA, L3 Cache) с максимизацией очков
-     */
-    optimizeByTopology(allocations, snapshot, osCores, irqCores) {
-        const topology = this.analyzeTopology(snapshot);
-        topology.osCores = osCores;
-        topology.irqCores = irqCores;
-
-        console.log('[Optimizer] Topology analysis', topology);
-
-        // Использовать scoring систему для оптимального размещения
-        const scoredPlacement = this.optimizeNumaPlacementByScore(allocations, topology);
-
-        // Объединить результаты scoring с allocations
-        return allocations.map((alloc, idx) => {
-            const placement = scoredPlacement.placements[idx];
-
-            const optimized = {
-                ...alloc,
-                coreAssignments: placement.services,
-                totalScore: placement.totalScore,
-                numaPlacement: this.buildNumaPlacementSummary(placement, topology),
-                l3Placement: this.partitionL3Cache(topology, alloc)
-            };
-
-            return optimized;
-        });
-    },
-
-    /**
-     * Построить summary размещения по NUMA на основе scoring результатов
-     */
-    buildNumaPlacementSummary(placement, topology) {
-        const networkNumaId = topology.networkNumas[0];
-        const summary = {
-            totalScore: placement.totalScore,
-            breakdown: {}
-        };
-
-        // Группировать сервисы по NUMA
-        placement.services.forEach(svc => {
-            if (!summary.breakdown[svc.numaId]) {
-                summary.breakdown[svc.numaId] = {
-                    numaId: svc.numaId,
-                    isNetwork: svc.numaId === networkNumaId,
-                    services: [],
-                    totalScore: 0
-                };
-            }
-
-            summary.breakdown[svc.numaId].services.push(svc.service);
-            summary.breakdown[svc.numaId].totalScore += svc.score;
-        });
-
-        return summary;
-    },
-
-    /**
-     * Анализ топологии (NUMA, L3, сокеты)
-     */
-    analyzeTopology(snapshot) {
-        const sockets = new Map();
-        const numas = new Map();
-        const l3Caches = new Map();
-        const networkNumas = new Set(snapshot.network.map(iface => iface.numaNode));
-
-        snapshot.topology.forEach(core => {
-            // Сокеты
-            if (!sockets.has(core.socketId)) {
-                sockets.set(core.socketId, {
-                    id: core.socketId,
-                    numas: new Set(),
-                    cores: []
-                });
-            }
-            sockets.get(core.socketId).numas.add(core.numaNodeId);
-            sockets.get(core.socketId).cores.push(core.id);
-
-            // NUMA
-            if (!numas.has(core.numaNodeId)) {
-                numas.set(core.numaNodeId, {
-                    id: core.numaNodeId,
-                    cores: [],
-                    l3Caches: new Set()
-                });
-            }
-            numas.get(core.numaNodeId).cores.push(core.id);
-            numas.get(core.numaNodeId).l3Caches.add(core.l3CacheId);
-
-            // L3 Cache
-            const l3Key = `${core.socketId}_${core.numaNodeId}_${core.l3CacheId}`;
-            if (!l3Caches.has(l3Key)) {
-                l3Caches.set(l3Key, {
-                    socketId: core.socketId,
-                    numaId: core.numaNodeId,
-                    l3Id: core.l3CacheId,
-                    cores: []
-                });
-            }
-            l3Caches.get(l3Key).cores.push(core.id);
-        });
-
-        return {
-            sockets: Array.from(sockets.values()).map(s => ({
-                ...s,
-                numas: Array.from(s.numas)
-            })),
-            numas: Array.from(numas.values()).map(n => ({
-                ...n,
-                l3Caches: Array.from(n.l3Caches)
-            })),
-            l3Caches: Array.from(l3Caches.values()),
-            networkNumas: Array.from(networkNumas),
-            // Для мульти-интерфейс серверов
-            instanceToInterface: snapshot.instanceToInterface || {},
-            interfaceNumaMap: snapshot.interfaceNumaMap || {}
-        };
-    },
-
-    /**
-     * Рассчитать очки за размещение на NUMA
-     * @param {Object} placement - Размещение {service, numaId, networkNumaId, l3Id, instanceId}
-     * @param {Object} topology - Топология сервера  
-     * @returns {number} Количество очков
-     */
-    calculateNumaScore(placement, topology) {
-        const { service, numaId, l3Id, gatewayL3Id, instanceId } = placement;
-
-        // Определить network NUMA для этого инстанса
-        let networkNumaId = topology.networkNumas[0]; // Default
-
-        // Если есть маппинг инстанс -> интерфейс -> NUMA, использовать его
-        if (instanceId && topology.instanceToInterface && topology.interfaceNumaMap) {
-            const ifName = topology.instanceToInterface[instanceId];
-            if (ifName && topology.interfaceNumaMap[ifName]) {
-                networkNumaId = parseInt(topology.interfaceNumaMap[ifName]);
-            }
-        }
-
-        let score = 0;
-
-        // CRITICAL (+1000) - Иначе быть не может
-        if (service === 'os' && numaId === 0) {
-            score += this.NUMA_SCORES.CRITICAL.os_on_node0;
-        }
-        if (service === 'irq' && numaId === networkNumaId) {
-            score += this.NUMA_SCORES.CRITICAL.irq_on_network;
-        }
-
-        // EXCELLENT (+100) - Супер правильно
-        if ((service === 'trash' || service === 'rf' || service === 'click') && numaId === networkNumaId) {
-            score += this.NUMA_SCORES.EXCELLENT.trash_rf_click_on_network;
-        }
-        if (service === 'gateway' && numaId === networkNumaId) {
-            score += this.NUMA_SCORES.EXCELLENT.gateway_on_network;
-        }
-        if (service === 'udp' && numaId === networkNumaId) {
-            score += this.NUMA_SCORES.EXCELLENT.udp_on_network;
-        }
-        if ((service === 'ar' || service === 'formula') && numaId === networkNumaId) {
-            score += this.NUMA_SCORES.EXCELLENT.ar_formula_on_network;
-        }
-
-        // ACCEPTABLE - Сойдет
-        if (service === 'robot' && l3Id === gatewayL3Id && l3Id !== undefined) {
-            score += this.NUMA_SCORES.ACCEPTABLE.robots_same_l3_with_gateways;
-        }
-        if (service === 'gateway' && numaId !== networkNumaId) {
-            score += this.NUMA_SCORES.ACCEPTABLE.gateway_not_on_network;
-        }
-        if ((service === 'trash' || service === 'click') && numaId !== networkNumaId) {
-            score += this.NUMA_SCORES.ACCEPTABLE.trash_click_not_on_network;
-        }
-
-        return score;
-    },
-
-    /**
-     * Оптимизация размещения с максимизацией общих очков
-     * @param {Array} allocations - Размещения инстансов
-     * @param {Object} topology - Топология сервера
-     * @returns {Object} Оптимизированное размещение
-     */
-    optimizeNumaPlacementByScore(allocations, topology) {
-        const networkNumaId = topology.networkNumas[0];
-
-        // Получить доступные NUMA и L3 зоны
-        const numaZones = topology.numas.map(n => ({
-            id: n.id,
-            cores: n.cores,
-            l3Caches: n.l3Caches,
-            availableCores: [...n.cores]
-        }));
-
-        const l3Zones = topology.l3Caches.map(l3 => ({
-            ...l3,
-            availableCores: [...l3.cores]
-        }));
-
-        // Для каждого инстанса создать placement plan
-        const placements = allocations.map(alloc => ({
-            instanceId: alloc.instanceId,
-            services: [],
-            totalScore: 0
-        }));
-
-        // Приоритет размещения (сначала критические, потом excellent, потом остальные)
-        const serviceOrder = [
-            // CRITICAL (должны быть размещены правильно)
-            { service: 'os', count: 'osCores', priority: 1000 },
-            { service: 'irq', count: 'irqCores', priority: 1000 },
-            // EXCELLENT (желательно на network NUMA)
-            { service: 'gateway', count: 'gateway', priority: 100 },
-            { service: 'trash', count: 'trash', priority: 100 },
-            { service: 'udp', count: 'udp', priority: 100 },
-            { service: 'ar', count: 'ar', priority: 100 },
-            { service: 'rf', count: 'rf', priority: 100 },
-            { service: 'formula', count: 'formula', priority: 100 },
-            { service: 'click', count: 'click', priority: 100 },
-            // ACCEPTABLE (могут быть где угодно)
-            { service: 'robot', count: 'robot', priority: 25 }
-        ];
-
-        // Разместить сервисы с максимизацией очков
-        serviceOrder.forEach(({ service, count, priority }) => {
-            allocations.forEach((alloc, allocIdx) => {
-                const coresNeeded = service === 'os' || service === 'irq'
-                    ? (service === 'os' ? topology.osCores : topology.irqCores)
-                    : alloc[count] || 0;
-
-                if (coresNeeded === 0) return;
-
-                // Найти лучшее размещение для этого сервиса
-                let bestPlacement = null;
-                let bestScore = -Infinity;
-
-                numaZones.forEach(numa => {
-                    if (numa.availableCores.length < coresNeeded) return;
-
-                    // Рассчитать score для этого размещения
-                    const score = this.calculateNumaScore({
-                        service,
-                        numaId: numa.id,
-                        l3Id: numa.l3Caches[0], // Упрощение: берём первый L3
-                        gatewayL3Id: this.findGatewayL3(placements[allocIdx], l3Zones),
-                        instanceId: alloc.instanceId
-                    }, topology);
-
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestPlacement = {
-                            numaId: numa.id,
-                            l3Id: numa.l3Caches[0],
-                            cores: numa.availableCores.slice(0, coresNeeded)
-                        };
-                    }
-                });
-
-                // Применить лучшее размещение
-                if (bestPlacement) {
-                    placements[allocIdx].services.push({
-                        service,
-                        numaId: bestPlacement.numaId,
-                        l3Id: bestPlacement.l3Id,
-                        cores: bestPlacement.cores,
-                        score: bestScore
-                    });
-
-                    placements[allocIdx].totalScore += bestScore;
-
-                    // Убрать использованные ядра из доступных
-                    const numa = numaZones.find(n => n.id === bestPlacement.numaId);
-                    numa.availableCores = numa.availableCores.filter(
-                        c => !bestPlacement.cores.includes(c)
-                    );
-                }
+            // Mandatory 1 core services
+            ['trash_combo', 'ar_combo', 'udp'].forEach(k => {
+                if (remaining > 0) { allocated.assigned[k] = 1; remaining--; }
             });
+
+            // Gateways (High Prio)
+            const gwGiven = Math.min(p.gateway, remaining);
+            allocated.assigned.gateway = gwGiven;
+            remaining -= gwGiven;
+
+            // Robots (Fill remaining)
+            const robGiven = Math.min(p.robot, remaining);
+            allocated.assigned.robot = robGiven;
+            remaining -= robGiven;
+
+            return allocated;
+        });
+    },
+
+    optimizeTopology(allocations, snapshot, osCores, totalIrqNeeded) {
+        const topology = this.analyzeTopology(snapshot);
+        const netNumas = topology.networkNumas; // Array of NUMA IDs
+
+        // Prepare grid
+        const coreMap = {}; // coreId -> { service, instance }
+        const freeCores = new Set(snapshot.topology.map(c => c.id));
+
+        // 1. Assign OS (Critical)
+        osCores.forEach(c => {
+            coreMap[c] = { service: 'os', instance: 'SYSTEM' };
+            freeCores.delete(c);
         });
 
-        // Рассчитать общий счёт
-        const totalScore = placements.reduce((sum, p) => sum + p.totalScore, 0);
+        // 2. Assign Services for each instance with Placement Logic
+        // We want to maximize Total Score.
+        // Strategies:
+        // - Place Network-Critical services on Network NUMA first.
+        // - Place High-Score services on Network NUMA next.
 
-        console.log('[Optimizer] NUMA placement scores:', {
-            placements: placements.map(p => ({
-                instance: p.instanceId,
-                score: p.totalScore
-            })),
-            totalScore
+        // Flatten all service requests into a list of "Tasks" with affinity
+        const tasks = [];
+
+        // Global IRQ Tasks (associated with instances roughly)
+        // We need to place IRQs. Logic: "1 IRQ per 4 Gateways".
+        // Ideally distribute IRQs based on where Gateways are, OR place on Network NUMA.
+        // Requirement: "IRQ - on network node".
+        // We will create IRQ tasks and assign them to Network NUMA.
+        for (let i = 0; i < totalIrqNeeded; i++) {
+            tasks.push({
+                type: 'irq', instance: 'SYSTEM',
+                mustBeNet: true, priority: 1000
+            });
+        }
+
+        allocations.forEach(alloc => {
+            // Mandatory Network
+            tasks.push({ type: 'udp', instance: alloc.instanceId, mustBeNet: true, priority: 1000 });
+            tasks.push({ type: 'trash_combo', instance: alloc.instanceId, mustBeNet: true, priority: 1000 });
+
+            // High Value
+            for(let i=0; i<alloc.assigned.gateway; i++)
+                tasks.push({ type: 'gateway', instance: alloc.instanceId, netBonus: 500, priority: 500 });
+
+            for(let i=0; i<alloc.assigned.ar_combo; i++)
+                tasks.push({ type: 'ar_combo', instance: alloc.instanceId, netBonus: 200, priority: 200 });
+
+            // Standard
+            for(let i=0; i<alloc.assigned.robot; i++)
+                tasks.push({ type: 'robot', instance: alloc.instanceId, netBonus: 100, priority: 100 });
+        });
+
+        // Sort tasks by priority
+        tasks.sort((a, b) => b.priority - a.priority);
+
+        // Placement Solver
+        // Iterate tasks and find best slot
+        const placementResult = [];
+        let globalScore = 0;
+
+        // Helper: Get best available core
+        const getBestCore = (task) => {
+            const instanceNetNuma = this.getInstanceNetNuma(task.instance, topology);
+
+            // Candidates: All free cores
+            const candidates = Array.from(freeCores).map(id => {
+                const coreInfo = snapshot.topology.find(c => c.id === id);
+                return { id, ...coreInfo };
+            });
+
+            if (candidates.length === 0) return null;
+
+            // Score each candidate
+            const scored = candidates.map(c => {
+                let score = 0;
+                const isNet = c.numaNodeId === instanceNetNuma;
+
+                // Hard Constraints
+                if (task.mustBeNet && !isNet) score = -10000;
+                else if (task.mustBeNet && isNet) score = 1000;
+
+                // Bonuses
+                if (task.netBonus && isNet) score += task.netBonus;
+
+                // L3 Affinity (Hot/Cold) separation preference
+                // Simple heuristic: If core is in "Service L3", favor Trash/IRQ/UDP.
+                // If "Hot L3", favor Gateway/Robot.
+                // We need to dynamically track L3 usage. For now, simple Net affinity is dominant.
+
+                return { core: c, score };
+            });
+
+            // Sort by score desc, then by core ID (keep compact)
+            scored.sort((a, b) => b.score - a.score || a.core.id - b.core.id);
+
+            // If strictly needed on Net but best score is low (no net cores left),
+            // we have a problem. But we take best available.
+            return scored[0];
+        };
+
+        tasks.forEach(task => {
+            const match = getBestCore(task);
+            if (match) {
+                freeCores.delete(match.core.id);
+                placementResult.push({
+                    core: match.core.id,
+                    service: task.type,
+                    instance: task.instance,
+                    score: match.score > -5000 ? match.score : 0 // Don't count penalties in display score
+                });
+                if (match.score > -5000) globalScore += match.score;
+            }
+        });
+
+        // Add OS to result
+        osCores.forEach(c => {
+            placementResult.push({ core: c, service: 'os', instance: 'SYSTEM', score: 1000 });
+            globalScore += 1000;
+        });
+
+        return this.formatResult(placementResult, globalScore, topology, allocations);
+    },
+
+    getInstanceNetNuma(instanceId, topology) {
+        // Logic to find which NUMA is "Network" for this instance
+        // Uses instanceToInterface map or defaults to first network node
+        if (instanceId === 'SYSTEM') return topology.networkNumas[0];
+
+        const iface = topology.instanceToInterface[instanceId];
+        if (iface && topology.interfaceNumaMap[iface] !== undefined) {
+            return parseInt(topology.interfaceNumaMap[iface]);
+        }
+        return topology.networkNumas[0];
+    },
+
+    formatResult(placements, totalScore, topology, allocations) {
+        // Group by instance
+        const instMap = {};
+        let irqCount = 0;
+
+        placements.forEach(p => {
+            if (p.service === 'irq') irqCount++;
+
+            // Include SYSTEM instance so we can visualize OS and IRQ assignments
+            if (!instMap[p.instance]) instMap[p.instance] = {
+                instanceId: p.instance,
+                totalScore: 0,
+                coreAssignments: [],
+                allocatedCores: 0,
+                // Needs from allocation plan
+                ...allocations.find(a => a.instanceId === p.instance)?.assigned
+            };
+
+            const inst = instMap[p.instance];
+            inst.totalScore += p.score;
+            inst.allocatedCores++;
+
+            // Group by service for display
+            // Map internal types to display names/roles
+            let role = 'sys_os';
+            if (p.service === 'gateway') role = 'gateway';
+            if (p.service === 'robot') role = 'robot_default';
+            if (p.service === 'trash_combo') role = 'trash'; // Will need to split visually or just assign trash
+            if (p.service === 'ar_combo') role = 'ar';
+            if (p.service === 'udp') role = 'udp';
+
+            // Special handling for combos: we assigned 1 core for combo,
+            // but in UI we might want to show multiple roles or just the primary one.
+            // For BENDER config generation, we need to know this core does multiple things.
+
+            // Add to assignments (grouping by service type)
+            let group = inst.coreAssignments.find(g => g.service === p.service);
+            if (!group) {
+                group = { service: p.service, cores: [] };
+                inst.coreAssignments.push(group);
+            }
+            group.cores.push(p.core);
+        });
+
+        // Calculate "Points" breakdown for UI
+        const instances = Object.values(instMap).map(inst => {
+            // Add placement breakdown
+            const breakdown = {};
+            inst.coreAssignments.forEach(g => {
+                g.cores.forEach(c => {
+                    const coreInfo = topology.coreInfo[c];
+                    const numa = coreInfo.numaNodeId;
+                    if (!breakdown[numa]) breakdown[numa] = { numaId: numa, services: [], totalScore: 0, isNetwork: topology.networkNumas.includes(numa) };
+                    breakdown[numa].services.push(g.service);
+                    // Re-calculate score for display if needed, or assume p.score
+                });
+            });
+
+            return {
+                ...inst,
+                numaPlacement: { breakdown, totalScore: inst.totalScore }
+            };
         });
 
         return {
-            placements,
-            totalScore
+            totalScore,
+            irqCoresCount: irqCount,
+            instances
         };
     },
 
-    /**
-     * Найти L3 где размещены гейты инстанса
-     */
-    findGatewayL3(placement, l3Zones) {
-        const gatewayService = placement.services.find(s => s.service === 'gateway');
-        return gatewayService ? gatewayService.l3Id : undefined;
-    },
+    analyzeTopology(snapshot) {
+        // Reuse existing logic but ensure we have quick lookups
+        const coreInfo = {};
+        snapshot.topology.forEach(c => coreInfo[c.id] = c);
 
-    /**
-     * Разделение L3 кэша на пулы
-     * 
-     * Стратегия:
-     * - Сервисный L3: Trash, UDP, IRQ, AR+RF, Gateways Tier A
-     * - Рабочий L3: Gateways SSS+, Robots
-     */
-    partitionL3Cache(topology, allocation) {
-        const l3Pools = {
-            service: {
-                name: 'Сервисный L3',
-                services: ['trash', 'click', 'rf', 'udp', 'irq', 'ar', 'formula'],
-                l3Caches: [],
-                reason: 'Холодные данные + сервисные задачи'
-            },
-            hot: {
-                name: 'Рабочий L3',
-                services: ['gateway', 'robot'],
-                l3Caches: [],
-                reason: 'Горячие данные - максимальная производительность'
-            }
+        return {
+            networkNumas: snapshot.network.map(n => n.numaNode),
+            instanceToInterface: snapshot.instanceToInterface || {},
+            interfaceNumaMap: snapshot.interfaceNumaMap || {},
+            coreInfo
         };
-
-        // Если L3 кэшей >= 2, разделить
-        if (topology.l3Caches.length >= 2) {
-            const sortedL3 = topology.l3Caches.sort((a, b) => a.cores.length - b.cores.length);
-
-            // Первый (меньший) L3 - сервисный
-            l3Pools.service.l3Caches.push(sortedL3[0]);
-
-            // Остальные - рабочие
-            l3Pools.hot.l3Caches.push(...sortedL3.slice(1));
-        } else {
-            // Один L3 - все в него
-            l3Pools.hot.l3Caches.push(...topology.l3Caches);
-        }
-
-        return l3Pools;
     },
 
-    /**
-     * Генерация рекомендаций
-     */
-    generateRecommendations(optimizedAllocations, snapshot) {
-        const recommendations = [];
+    mapServiceType(name) {
+        if (!name) return 'other';
+        const l = name.toLowerCase();
+        if (l.includes('gateway')) return 'gateway';
+        if (l.includes('robot')) return 'robot';
+        if (l.includes('trash')) return 'trash';
+        if (l.includes('udp')) return 'udp';
+        if (l.includes('ar')) return 'ar';
+        if (l.includes('rf')) return 'rf';
+        if (l.includes('formula')) return 'formula';
+        if (l.includes('click')) return 'click';
+        return 'other';
+    },
 
-        // Для каждого инстанса
-        optimizedAllocations.forEach(alloc => {
-            const inst = {
-                instanceId: alloc.instanceId,
-                changes: [],
-                warnings: [],
-                priorities: []
-            };
-
-            // Проверить гейты
-            if (alloc.currentLoads.gateway) {
-                const current = alloc.currentLoads.gateway.cores;
-                const proposed = alloc.gateway;
-
-                if (proposed > current) {
-                    inst.changes.push({
-                        type: 'increase',
-                        service: 'Gateway',
-                        from: current,
-                        to: proposed,
-                        reason: `Текущая нагрузка ${alloc.currentLoads.gateway.avgLoad.toFixed(1)}% требует увеличения`
-                    });
-                    inst.priorities.push('high');
-                } else if (proposed < current) {
-                    inst.changes.push({
-                        type: 'decrease',
-                        service: 'Gateway',
-                        from: current,
-                        to: proposed,
-                        reason: `Недогрузка ${alloc.currentLoads.gateway.avgLoad.toFixed(1)}% - можно освободить ядра`
-                    });
-                    inst.priorities.push('medium');
-                }
-            }
-
-            // Проверить роботов
-            if (alloc.currentLoads.robot) {
-                const current = alloc.currentLoads.robot.cores;
-                const proposed = alloc.robot;
-
-                if (proposed > current) {
-                    inst.changes.push({
-                        type: 'increase',
-                        service: 'Robot',
-                        from: current,
-                        to: proposed,
-                        reason: `Нагрузка ${alloc.currentLoads.robot.avgLoad.toFixed(1)}% в критической зоне - нужно снизить до 30-50%`
-                    });
-                    inst.priorities.push('critical');
-                } else if (proposed < current) {
-                    inst.changes.push({
-                        type: 'decrease',
-                        service: 'Robot',
-                        from: current,
-                        to: proposed,
-                        reason: `Недогрузка ${alloc.currentLoads.robot.avgLoad.toFixed(1)}%`
-                    });
-                    inst.priorities.push('low');
-                }
-            }
-
-            // NUMA recommendations
-            if (alloc.numaPlacement.tier1) {
-                inst.changes.push({
-                    type: 'numa_placement',
-                    service: 'Gateway + IRQ',
-                    numa: alloc.numaPlacement.tier1.numaId,
-                    reason: alloc.numaPlacement.tier1.reason,
-                    priority: 'high'
-                });
-            }
-
-            // L3 recommendations
-            if (alloc.l3Placement.service) {
-                inst.changes.push({
-                    type: 'l3_cache',
-                    pool: 'service',
-                    services: alloc.l3Placement.service.services,
-                    reason: alloc.l3Placement.service.reason
-                });
-            }
-
-            if (inst.changes.length > 0) {
-                recommendations.push(inst);
-            }
+    generateRecommendations(instances, snapshot) {
+        // Generate text advice based on changes
+        const recs = [];
+        instances.forEach(inst => {
+           // Simple change detection logic could go here
         });
-
-        return recommendations;
+        return recs;
     }
 };
 
-// Export for use in main app
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = CPU_OPTIMIZER;
-} else {
-    // Browser export
-    window.CPUOptimizer = CPU_OPTIMIZER;
-}
+if (typeof window !== 'undefined') window.CPU_OPTIMIZER = CPU_OPTIMIZER;
+if (typeof module !== 'undefined') module.exports = CPU_OPTIMIZER;
