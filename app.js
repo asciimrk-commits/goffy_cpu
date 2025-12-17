@@ -482,7 +482,7 @@ const HFT = {
     },
 
     renderCore(instanceName, cpu) {
-        const load = parseFloat(this.state.cpuLoadMap[`cpu${cpu}`] || 0);
+        const load = parseFloat(this.state.cpuLoadMap[cpu] || 0);
         const loadColor = load > 80 ? '#ef4444' : (load > 50 ? '#f59e0b' : '#22c55e');
         const hasIRQ = this.state.coreIRQMap[cpu]?.length > 0;
 
