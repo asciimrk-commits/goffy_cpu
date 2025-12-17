@@ -477,17 +477,33 @@ const CPU_OPTIMIZER = {
                 l3Caches: Array.from(n.l3Caches)
             })),
             l3Caches: Array.from(l3Caches.values()),
-            networkNumas: Array.from(networkNumas)
+            networkNumas: Array.from(networkNumas),
+            // Для мульти-интерфейс серверов
+            instanceToInterface: snapshot.instanceToInterface || {},
+            interfaceNumaMap: snapshot.interfaceNumaMap || {}
         };
     },
 
     /**
      * Рассчитать очки за размещение на NUMA
-     * @param {Object} placement - Размещение {service, numaId, networkNumaId, l3Id}
+     * @param {Object} placement - Размещение {service, numaId, networkNumaId, l3Id, instanceId}
+     * @param {Object} topology - Топология сервера  
      * @returns {number} Количество очков
      */
-    calculateNumaScore(placement) {
-        const { service, numaId, networkNumaId, l3Id, gatewayL3Id } = placement;
+    calculateNumaScore(placement, topology) {
+        const { service, numaId, l3Id, gatewayL3Id, instanceId } = placement;
+
+        // Определить network NUMA для этого инстанса
+        let networkNumaId = topology.networkNumas[0]; // Default
+
+        // Если есть маппинг инстанс -> интерфейс -> NUMA, использовать его
+        if (instanceId && topology.instanceToInterface && topology.interfaceNumaMap) {
+            const ifName = topology.instanceToInterface[instanceId];
+            if (ifName && topology.interfaceNumaMap[ifName]) {
+                networkNumaId = parseInt(topology.interfaceNumaMap[ifName]);
+            }
+        }
+
         let score = 0;
 
         // CRITICAL (+1000) - Иначе быть не может
@@ -592,10 +608,10 @@ const CPU_OPTIMIZER = {
                     const score = this.calculateNumaScore({
                         service,
                         numaId: numa.id,
-                        networkNumaId,
                         l3Id: numa.l3Caches[0], // Упрощение: берём первый L3
-                        gatewayL3Id: this.findGatewayL3(placements[allocIdx], l3Zones)
-                    });
+                        gatewayL3Id: this.findGatewayL3(placements[allocIdx], l3Zones),
+                        instanceId: alloc.instanceId
+                    }, topology);
 
                     if (score > bestScore) {
                         bestScore = score;
