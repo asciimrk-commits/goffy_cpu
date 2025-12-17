@@ -681,8 +681,8 @@ const HFT = {
         // Get NUMA of taskset core for membind
         let membind = '';
         if (trashCpu !== '') {
-            const tasksetNuma = this.state.coreNumaMap.get(String(trashCpu)) ||
-                this.state.coreNumaMap.get(trashCpu);
+            const tasksetNuma = this.state.coreNumaMap[String(trashCpu)] ||
+                this.state.coreNumaMap[trashCpu];
             if (tasksetNuma !== undefined) {
                 membind = String(tasksetNuma);
             }
