@@ -1515,7 +1515,11 @@ const HFT = {
             return;
         }
 
-        const result = HFT_RULES.generateRecommendation(this.state);
+        // Use new CPUOptimizer instead of old HFT_RULES
+        const result = window.CPUOptimizer ?
+            CPUOptimizer.optimize(this.state) :
+            HFT_RULES.generateRecommendation(this.state);
+
         this.proposedConfig = result.proposedConfig;
 
         output.innerHTML = result.html;
