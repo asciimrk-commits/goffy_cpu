@@ -809,4 +809,7 @@ const CPU_OPTIMIZER = {
 // Export for use in main app
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = CPU_OPTIMIZER;
+} else {
+    // Browser export
+    window.CPUOptimizer = CPU_OPTIMIZER;
 }
