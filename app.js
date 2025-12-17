@@ -594,7 +594,7 @@ const HFT = {
         }
 
         // Bender Source
-        if (this.state.coreBenderMap[cpu]) {
+        if (this.state.coreBenderMap && this.state.coreBenderMap[cpu]) {
             html += `<div class="tooltip-bender">Bender: ${this.state.coreBenderMap[cpu]}</div>`;
         }
 
@@ -889,6 +889,8 @@ const HFT = {
         this.state.isolatedCores = new Set(config.isolatedCores || []);
         this.state.instances = {};
         this.state.coreNumaMap = {};
+        this.state.coreBenderMap = config.coreBenderMap || {};
+
 
         Object.entries(this.state.geometry).forEach(([socket, numaData]) => {
             Object.entries(numaData).forEach(([numa, l3Data]) => {
