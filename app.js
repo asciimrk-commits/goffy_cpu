@@ -1864,7 +1864,7 @@ net0: 0-31
 
         // Group cores by NUMA
         Object.entries(this.state.instances.Physical || {}).forEach(([cpu, tags]) => {
-            const numa = this.state.coreNumaMap.get(cpu) || this.state.coreNumaMap.get(parseInt(cpu));
+            const numa = this.state.coreNumaMap[cpu] || this.state.coreNumaMap[parseInt(cpu)];
             if (numa === undefined) return;
 
             tags.forEach(role => {
