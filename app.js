@@ -482,7 +482,7 @@ const HFT = {
     },
 
     renderCore(instanceName, cpu) {
-        const load = parseFloat(this.state.cpuLoadMap[cpu] || 0);
+        const load = parseFloat(this.state.cpuLoadMap[`cpu${cpu}`] || 0);
         const loadColor = load > 80 ? '#ef4444' : (load > 50 ? '#f59e0b' : '#22c55e');
         const hasIRQ = this.state.coreIRQMap[cpu]?.length > 0;
 
@@ -1013,6 +1013,7 @@ const HFT = {
                 else if (trimmed.includes('NETWORK')) currentSection = 'network';
                 else if (trimmed.includes('BENDER_NET')) currentSection = 'bender_net';
                 else if (trimmed.includes('BENDER')) currentSection = 'bender';
+                else if (trimmed.includes('LOAD_AVG') || trimmed.includes('END_LOAD')) currentSection = 'load';
                 return;
             }
 
@@ -1057,9 +1058,18 @@ const HFT = {
 
             // Parse NETWORK section: "IF:net0|NUMA:1|..."
             if (currentSection === 'network') {
+                const ifMatch = trimmed.match(/IF:([^|]+)/i);
                 const numaMatch = trimmed.match(/NUMA:(\d+)/i);
-                if (numaMatch) {
+
+                if (ifMatch && numaMatch) {
+                    const ifName = ifMatch[1].trim();
                     const numaId = numaMatch[1];
+
+                    // Save interface to NUMA mapping
+                    if (!config.interfaceNumaMap) config.interfaceNumaMap = {};
+                    config.interfaceNumaMap[ifName] = numaId;
+
+                    // Also collect unique network NUMA nodes
                     if (!config.netNumaNodes.includes(numaId)) {
                         config.netNumaNodes.push(numaId);
                     }
@@ -1103,12 +1113,23 @@ const HFT = {
                         // Match patterns like: GatewaysDefault: [OMM0] or RobotsDefault:[OTC1]
                         const rolePattern = /(\w+)\s*:\s*\[([^\]]*)\]/g;
                         let match;
+                        const instancesOnThisCore = new Set();
+
                         while ((match = rolePattern.exec(trimmed)) !== null) {
                             const benderName = match[1];
                             const instanceList = match[2];
 
                             // Skip non-role fields
-                            if (['cpu_id', 'isolated', 'net_cpu'].includes(benderName)) continue;
+                            if (['cpu_id', 'isolated'].includes(benderName)) continue;
+
+                            // Track net_cpu interface for instances
+                            if (benderName === 'net_cpu' && instanceList) {
+                                const ifName = instanceList.trim();
+                                // For each service instance on this core, associate with this interface
+                                // We'll do this in second pass
+                                if (!config.coreToInterface) config.coreToInterface = {};
+                                config.coreToInterface[cpuStr] = ifName;
+                            }
 
                             // Map bender name to role ID
                             const roleId = this.benderToRole[benderName];
@@ -1117,7 +1138,23 @@ const HFT = {
                                 if (!config.instances.Physical[cpuStr].includes(roleId)) {
                                     config.instances.Physical[cpuStr].push(roleId);
                                 }
+
+                                // Track which instance this is for interface mapping
+                                if (instanceList) {
+                                    instancesOnThisCore.add(instanceList.trim());
+                                }
                             }
+                        }
+
+                        // If this core has net_cpu, map all instances on it to that interface
+                        if (netCpuMatch && instancesOnThisCore.size > 0) {
+                            const ifName = netCpuMatch[1].trim();
+                            if (!config.instanceToInterface) config.instanceToInterface = {};
+                            instancesOnThisCore.forEach(inst => {
+                                if (!config.instanceToInterface[inst]) {
+                                    config.instanceToInterface[inst] = ifName;
+                                }
+                            });
                         }
 
                         // If isolated but no specific role assigned (just {cpu_id: X, isolated: True})
@@ -1126,6 +1163,21 @@ const HFT = {
                     return;
                 }
 
+                return;
+            }
+
+            // Parse LOAD_AVG section: cpu0:6.37
+            if (currentSection === 'load') {
+                if (trimmed.match(/^cpu\d+:/)) {
+                    const match = trimmed.match(/^(cpu\d+):([\d.]+)/);
+                    if (match) {
+                        const cpuName = match[1];
+                        const load = parseFloat(match[2]);
+                        if (!isNaN(load)) {
+                            config.cpuLoadMap[cpuName] = load;
+                        }
+                    }
+                }
                 return;
             }
 
