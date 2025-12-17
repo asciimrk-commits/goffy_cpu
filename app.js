@@ -1067,35 +1067,50 @@ const HFT = {
                 return;
             }
 
-            // Parse BENDER section
+            // Parse BENDER section - V5 Format
             if (currentSection === 'bender') {
-                // Format: {'cpu_id': 0, 'isolated': True, 'RobotsDefault': ['OTT4']}
-                // or: {cpu_id:0,isolated:True,RobotsDefault:[OTT4]}
+                // Format: {cpu_id: 0} or {cpu_id: 9, isolated: True, TrashCPU: [OMM0]}
                 if (trimmed.startsWith('{') && trimmed.includes('cpu_id')) {
                     // Extract cpu_id
-                    const cpuMatch = trimmed.match(/['"]?cpu_id['"]?\s*:\s*(\d+)/);
+                    const cpuMatch = trimmed.match(/cpu_id\s*:\s*(\d+)/);
                     if (cpuMatch) {
                         const cpu = parseInt(cpuMatch[1]);
                         const cpuStr = String(cpu);
 
-                        // Find all role assignments
-                        // Match patterns like: 'RobotsDefault': ['OTT4'] or RobotsDefault:[OTT4]
-                        const rolePattern = /['"]?(\w+)['"]?\s*:\s*\[/g;
+                        // Check if this core is isolated
+                        const isIsolated = /isolated\s*:\s*True/i.test(trimmed);
+
+                        // If NOT isolated, it's an OS core
+                        if (!isIsolated) {
+                            if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                            if (!config.instances.Physical[cpuStr].includes('sys_os')) {
+                                config.instances.Physical[cpuStr].push('sys_os');
+                            }
+                            return;
+                        }
+
+                        // If isolated, check for net_cpu first (IRQ cores)
+                        const netCpuMatch = trimmed.match(/net_cpu\s*:\s*\[([^\]]+)\]/);
+                        if (netCpuMatch) {
+                            if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
+                            if (!config.instances.Physical[cpuStr].includes('net_irq')) {
+                                config.instances.Physical[cpuStr].push('net_irq');
+                            }
+                            // Continue to check for other services too (in case there are multiple roles)
+                        }
+
+                        // Find all service assignments (pattern: ServiceName: [InstanceID])
+                        // Match patterns like: GatewaysDefault: [OMM0] or RobotsDefault:[OTC1]
+                        const rolePattern = /(\w+)\s*:\s*\[([^\]]*)\]/g;
                         let match;
                         while ((match = rolePattern.exec(trimmed)) !== null) {
                             const benderName = match[1];
+                            const instanceList = match[2];
+
                             // Skip non-role fields
-                            if (['cpu_id', 'isolated'].includes(benderName)) continue;
+                            if (['cpu_id', 'isolated', 'net_cpu'].includes(benderName)) continue;
 
-                            // Handle net_cpu as net_irq
-                            if (benderName === 'net_cpu') {
-                                if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
-                                if (!config.instances.Physical[cpuStr].includes('net_irq')) {
-                                    config.instances.Physical[cpuStr].push('net_irq');
-                                }
-                                continue;
-                            }
-
+                            // Map bender name to role ID
                             const roleId = this.benderToRole[benderName];
                             if (roleId) {
                                 if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
@@ -1104,57 +1119,13 @@ const HFT = {
                                 }
                             }
                         }
+
+                        // If isolated but no specific role assigned (just {cpu_id: X, isolated: True})
+                        // Don't add any tag - it's just isolated, which is fine
                     }
                     return;
                 }
 
-                // Summary block: {'AllRobotsThCPU': [40], ...} or multiline
-                // Match role: [cores] patterns
-                const summaryPattern = /['"]?(\w+)['"]?\s*:\s*\[([^\]]*)/g;
-                let match;
-                while ((match = summaryPattern.exec(trimmed)) !== null) {
-                    const benderName = match[1];
-                    const coresStr = match[2];
-
-                    // Skip if it looks like instance names like ['OTT4']
-                    if (coresStr.includes("'") || coresStr.includes('"')) continue;
-
-                    const cores = this.parseCoreList(coresStr);
-                    if (cores.length === 0) continue;
-
-                    if (benderName === 'Isolated') {
-                        cores.forEach(c => {
-                            if (!config.isolatedCores.includes(c)) config.isolatedCores.push(c);
-                        });
-                    } else {
-                        const roleId = this.benderToRole[benderName];
-                        if (roleId) {
-                            cores.forEach(cpu => {
-                                const cpuStr = String(cpu);
-                                if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
-                                if (!config.instances.Physical[cpuStr].includes(roleId)) {
-                                    config.instances.Physical[cpuStr].push(roleId);
-                                }
-                            });
-                        }
-                    }
-                }
-
-                // Infer OS cores (cpu_id present but no roles and not isolated)
-                // This requires us to have tracked which CPUs were mentioned
-                // But in this pass we process line by line.
-                // We need to check for simple {cpu_id:X} lines that have no other roles.
-                // Re-scanning the line for this specific case.
-                if (trimmed.startsWith('{') && trimmed.includes('cpu_id') && !trimmed.includes('isolated') && !trimmed.includes('[')) {
-                    const cpuMatch = trimmed.match(/['"]?cpu_id['"]?\s*:\s*(\d+)/);
-                    if (cpuMatch) {
-                        const cpuStr = String(cpuMatch[1]);
-                        if (!config.instances.Physical[cpuStr] || config.instances.Physical[cpuStr].length === 0) {
-                            if (!config.instances.Physical[cpuStr]) config.instances.Physical[cpuStr] = [];
-                            config.instances.Physical[cpuStr].push('sys_os');
-                        }
-                    }
-                }
                 return;
             }
 
