@@ -38,8 +38,8 @@
     --shadow-md: none;
 
     /* Adaptive core sizing */
-    --core-size: clamp(28px, 3.5vw, 48px);
-    --core-font: clamp(9px, 1.2vw, 12px);
+    --core-size: 48px;
+    --core-font: 14px;
 
     /* Typography */
     --font-ui: 'Inter', sans-serif;
@@ -567,12 +567,29 @@ body {
     align-items: center;
     justify-content: center;
     font-family: var(--font-mono);
-    font-size: clamp(9px, 1vw, 11px); /* Slightly smaller max font */
+    font-size: var(--core-font);
     color: var(--text-muted);
     cursor: pointer;
     position: relative;
     user-select: none;
     transition: all 0.1s;
+}
+
+.core-label {
+    position: absolute;
+    bottom: 2px;
+    left: 2px;
+    right: 2px;
+    font-size: 9px;
+    line-height: 1;
+    text-align: center;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.9);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
 
 .core:hover {
