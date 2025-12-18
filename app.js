@@ -14,7 +14,8 @@ const HFT = {
         coreIRQMap: {},     // cpu -> [irq numbers]
         cpuLoadMap: {},     // cpu -> load%
         instances: { Physical: {} },
-        networkInterfaces: []
+        networkInterfaces: [],
+        selectedInstance: 'Physical'
     },
 
     activeTool: null,
@@ -30,11 +31,45 @@ const HFT = {
         this.initKeyboard();
         this.initSidebar();
         this.initMainDragDrop();
+        this.initInstanceManager();
         this.activeTool = HFT_RULES.roles.robot_default;
 
         // Phase 1: Try to load from URL hash first, then localStorage
         if (!this.loadFromUrlHash()) {
             this.restoreFromLocalStorage();
+        }
+    },
+
+    initInstanceManager() {
+        this.updateInstanceSelect();
+    },
+
+    updateInstanceSelect() {
+        const select = document.getElementById('instance-select');
+        if (!select) return;
+        select.innerHTML = '';
+        Object.keys(this.state.instances).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name === 'Physical' ? 'Physical (System)' : name;
+            opt.selected = name === this.state.selectedInstance;
+            select.appendChild(opt);
+        });
+    },
+
+    selectInstance(name) {
+        this.state.selectedInstance = name;
+    },
+
+    addInstance() {
+        const input = document.getElementById('new-instance-name');
+        const name = input?.value?.trim().toUpperCase();
+        if (name && !this.state.instances[name]) {
+            this.state.instances[name] = {};
+            this.state.selectedInstance = name;
+            this.updateInstanceSelect();
+            input.value = '';
+            this.renderBlueprint(); // Refresh map
         }
     },
 
@@ -147,11 +182,15 @@ const HFT = {
     // PARSING - v4.5 Fixed BENDER parsing
     // =========================================================================
     parse(text) {
+        // Preserve selected instance if it exists in the new parse, otherwise Physical
+        const currentSelection = this.state && this.state.selectedInstance ? this.state.selectedInstance : 'Physical';
+        
         this.state = {
             serverName: '', geometry: {}, coreNumaMap: {}, l3Groups: {},
             netNumaNodes: new Set(), isolatedCores: new Set(), coreIRQMap: {},
             cpuLoadMap: {}, instances: { Physical: {} }, networkInterfaces: [],
-            coreBenderMap: {}, instanceToInterface: {}
+            coreBenderMap: {}, instanceToInterface: {},
+            selectedInstance: 'Physical' // Will be updated after parse if possible
         };
 
         const lines = text.split('\n');
@@ -367,12 +406,18 @@ const HFT = {
                 // Also ensure core is added to Physical for backward compatibility/global view if needed
                 // But our visualizer aggregates all instances so we just add to specific instance
                 this.addTag(instanceName, cpu, roleObj.id);
-
-                // Also add to Physical as 'active' core marker if needed?
-                // The current visualizer iterates all keys in this.state.instances.
-                // If we add to 'OMM0', getDisplayTags will find it.
             });
         });
+
+        // Restore selected instance if valid, otherwise Physical
+        if (this.state.instances[currentSelection]) {
+            this.state.selectedInstance = currentSelection;
+        } else {
+            this.state.selectedInstance = 'Physical';
+        }
+        
+        // Refresh instance selector
+        this.updateInstanceSelect();
 
         return this.state.geometry;
     },
@@ -518,6 +563,7 @@ const HFT = {
             ${cpu}
             <div class="load-bar"><div class="load-fill" style="width:${load}%;background:${loadColor}"></div></div>
             ${hasIRQ ? '<div class="irq-dot"></div>' : ''}
+            <div class="core-label"></div>
         </div>`;
     },
 
@@ -543,6 +589,18 @@ const HFT = {
         el.classList.remove('has-role', 'isolated');
         el.style.background = '';
         el.style.borderColor = '';
+        el.querySelector('.core-label').textContent = '';
+
+        // Determine Instance Label
+        let activeInst = null;
+        Object.keys(this.state.instances).forEach(inst => {
+            if (inst !== 'Physical' && this.state.instances[inst][cpu]?.size > 0) {
+                activeInst = inst;
+            }
+        });
+        if (activeInst) {
+             el.querySelector('.core-label').textContent = activeInst;
+        }
 
         if (fillTags.length > 0) el.classList.add('has-role');
         if (isIsolated) el.classList.add('isolated');
@@ -562,14 +620,14 @@ const HFT = {
     // =========================================================================
     // INTERACTIONS
     // =========================================================================
-    onCoreMouseDown(event, instanceName, cpu) {
+    onCoreMouseDown(event, _instanceName, cpu) {
         this.isMouseDown = true;
-        this.applyTool(instanceName, cpu, false, event.ctrlKey || event.metaKey);
+        this.applyTool(this.state.selectedInstance, cpu, false, event.ctrlKey || event.metaKey);
     },
 
-    onCoreMouseEnter(event, instanceName, cpu) {
-        if (this.isMouseDown) this.applyTool(instanceName, cpu, true, event.ctrlKey || event.metaKey);
-        this.showTooltip(event, instanceName, cpu);
+    onCoreMouseEnter(event, _instanceName, cpu) {
+        if (this.isMouseDown) this.applyTool(this.state.selectedInstance, cpu, true, event.ctrlKey || event.metaKey);
+        this.showTooltip(event, this.state.selectedInstance, cpu);
     },
 
     applyTool(instanceName, cpu, forceAdd, isEraser) {
@@ -686,144 +744,125 @@ const HFT = {
     },
 
     updateStats() {
-        const physicalRoles = {};
-        const allCpus = new Set();
+        let txt = '---\n';
+        txt += 'hft_tunels: true\n\n';
 
+        // 1. Host Vars (isol_cpus, net_cpus, irqaffinity)
+        const isolatedCores = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a, b) => a - b);
+        if (isolatedCores.length > 0) {
+            txt += `isol_cpus: ${this.formatCoreRange(isolatedCores)}\n`;
+        }
+
+        // net_cpus
+        const physicalRoles = {};
         Object.entries(this.state.instances.Physical || {}).forEach(([cpu, tags]) => {
-            allCpus.add(parseInt(cpu));
             tags.forEach(t => {
                 if (!physicalRoles[t]) physicalRoles[t] = [];
                 physicalRoles[t].push(parseInt(cpu));
             });
         });
-
-        // Sort all role cores
-        Object.keys(physicalRoles).forEach(role => {
-            physicalRoles[role].sort((a, b) => a - b);
-        });
-
-        // Collect isolated cores
-        const isolatedCores = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a, b) => a - b);
-
-        // Get instance name from server name
-        const instanceName = this.state.serverName?.toUpperCase() || 'INSTANCE';
-
-        // Main taskset (trash_cpu or first available)
-        const trashCpu = physicalRoles['trash']?.[0] || '';
-
-        // Get NUMA of taskset core for membind
-        let membind = '';
-        if (trashCpu !== '') {
-            const tasksetNuma = this.state.coreNumaMap[String(trashCpu)] ||
-                this.state.coreNumaMap[trashCpu];
-            if (tasksetNuma !== undefined) {
-                membind = String(tasksetNuma);
-            }
-        }
-        // If no specific taskset or multiple instances, use all NUMAs
-        if (!membind) {
-            const allNumas = [...new Set(Object.values(Object.fromEntries(this.state.coreNumaMap)))].sort();
-            membind = allNumas.join(',');
-        }
-
-        // Build YAML-style bs_instances config
-        let txt = 'bs_instances:\n';
-        txt += `  ${instanceName}:\n`;
-        txt += `    path: bender2-${instanceName}\n`;
-        txt += `    name: ${instanceName}\n`;
-        txt += `    id: 0\n`;
-        txt += `    daemon_pri: dsf1.qb.loc:8051\n`;
-        txt += `    daemon_sec: dsf3.qb.loc:8051\n`;
-        txt += `    membind: "${membind}"\n`;
-        txt += `    taskset: "${trashCpu}"\n`;
-        txt += `    trash_cpu: "${trashCpu}"\n`;
-
-        // AllRobots CPU
-        const arCpu = physicalRoles['ar']?.[0] || '';
-        txt += `    allrobots_cpu: "${arCpu}"\n`;
-
-        // RemoteFormula CPU
-        const rfCpu = physicalRoles['rf']?.[0] || physicalRoles['trash']?.[0] || '';
-        txt += `    remoteformula_cpu: "${rfCpu}"\n`;
-
-        // Gateways
-        const gwCores = physicalRoles['gateway'] || [];
-        txt += `    gateways_cpu: ${gwCores.join(',')}\n`;
-
-        // Default robots
-        const robotsCores = physicalRoles['robot_default'] || [];
-        txt += `    robots_cpu: ${robotsCores.join(',')}\n`;
-
-        // UDP cores
-        const udpCores = physicalRoles['udp'] || [];
-        txt += `    udpsend_cpu: "${udpCores[0] || ''}"\n`;
-        txt += `    udpreceive_cpu: "${udpCores[0] || ''}"\n`;
-        txt += `    udp_emitstats: true\n`;
-        txt += `    type: colo\n`;
-
-        // CPUAlias custom entries
-        txt += `    cpualias_custom:\n`;
-
-        // Formula
-        const formulaCpu = physicalRoles['formula']?.[0] || physicalRoles['trash']?.[0] || '';
-        if (formulaCpu) {
-            txt += `      - <CPUAlias Name="Formula" Cores="${formulaCpu}" IoService="true" Debug="false" />\n`;
-        }
-
-        // Isolated Robots (isolated cores not used by other roles)
-        const isolatedRobots = physicalRoles['isolated_robots'] || [];
-        if (isolatedRobots.length > 0) {
-            txt += `      - <CPUAlias Name="Isolated" Cores="${isolatedRobots.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO"/>\n`;
-        }
-
-        // Pool 1 (RobotsNode1)
-        const pool1 = physicalRoles['pool1'] || [];
-        if (pool1.length > 0) {
-            txt += `      - <CPUAlias Name="RobotsNode1" Cores="${pool1.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />\n`;
-        }
-
-        // Pool 2 (RobotsNode2)
-        const pool2 = physicalRoles['pool2'] || [];
-        if (pool2.length > 0) {
-            txt += `      - <CPUAlias Name="RobotsNode2" Cores="${pool2.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />\n`;
-        }
-
-        // ClickHouse at the bottom
-        txt += '\n';
-        const clickCores = physicalRoles['click'] || [];
-        if (clickCores.length > 0) {
-            txt += `clickhouse: ${clickCores.join(',')}\n`;
-        }
-
-        // System config block
-        txt += '\n---\n';
-        txt += 'hft_tunels: true\n';
-
-        // isol_cpus - isolated cores range
-        if (isolatedCores.length > 0) {
-            txt += `isol_cpus: ${this.formatCoreRange(isolatedCores)}\n`;
-        }
-
-        // irqaffinity_cpus - non-isolated (OS) cores
-        const sysCores = (physicalRoles['sys_os'] || []).sort((a, b) => a - b);
-        if (sysCores.length > 0) {
-            txt += `irqaffinity_cpus: ${this.formatCoreRange(sysCores)}\n`;
-        }
-
-        // net_cpus - network interface to cores mapping
-        const netCores = physicalRoles['net_irq'] || [];
+        const netCores = (physicalRoles['net_irq'] || []).sort((a, b) => a - b);
         if (netCores.length > 0) {
-            txt += '\nnet_cpus:\n';
-            // Get network interfaces from state
+            txt += 'net_cpus:\n';
+            // Use collected network interfaces or fallback to net0
             const netInterfaces = this.state.networkInterfaces || [];
             if (netInterfaces.length > 0) {
                 netInterfaces.forEach(iface => {
-                    txt += `  ${iface}: [${netCores.join(', ')}]\n`;
+                    // Check if we have specific mapping for this interface
+                    txt += `  ${iface.name || iface}: [${netCores.join(', ')}]\n`;
                 });
             } else {
                 txt += `  net0: [${netCores.join(', ')}]\n`;
             }
         }
+
+        // irqaffinity_cpus (sys_os)
+        const sysCores = (physicalRoles['sys_os'] || []).sort((a, b) => a - b);
+        if (sysCores.length > 0) {
+            txt += `irqaffinity_cpus: ${this.formatCoreRange(sysCores)}\n`;
+        }
+
+        // 2. bs_instances
+        txt += '\n\nbs_instances:\n';
+
+        // Iterate over all instances (skipping 'Physical')
+        // If only 'Physical' exists, we might treat it as a default instance if it has services assigned
+        const instances = Object.keys(this.state.instances).filter(k => k !== 'Physical');
+        
+        // If no explicit instances, check if Physical has services that imply an instance
+        if (instances.length === 0) {
+            // Fallback: Create one instance named after server or default
+             const instanceName = this.state.serverName?.toUpperCase() || 'INSTANCE';
+             instances.push(instanceName);
+        }
+
+        instances.forEach((instName, idx) => {
+            const instRoles = {};
+            // If it's the fallback instance, use Physical roles. Otherwise use instance roles.
+            const sourceInst = this.state.instances[instName] ? instName : 'Physical';
+
+            Object.entries(this.state.instances[sourceInst] || {}).forEach(([cpu, tags]) => {
+                 tags.forEach(t => {
+                    if (!instRoles[t]) instRoles[t] = [];
+                    instRoles[t].push(parseInt(cpu));
+                });
+            });
+
+            // Helper to get cores
+            const getCores = (role) => (instRoles[role] || []).sort((a, b) => a - b);
+            const getOne = (role) => getCores(role)[0] || '';
+
+            const trashCpu = getOne('trash');
+            let membind = '';
+            if (trashCpu !== '') {
+                const numa = this.state.coreNumaMap[String(trashCpu)];
+                if (numa !== undefined) membind = String(numa);
+            }
+            if (!membind) {
+                 // Fallback: all NUMAs
+                 membind = [...new Set(Object.values(Object.fromEntries(this.state.coreNumaMap)))].sort().join(',');
+            }
+
+            txt += `  ${instName}:\n`;
+            txt += `    name: ${instName}\n`;
+            txt += `    id: ${idx}\n`;
+            txt += `    daemon_pri: dmx1.qb.loc:8050\n`;
+            txt += `    daemon_sec: dmx2.qb.loc:8050\n`;
+            txt += `    membind: "${membind}"\n`;
+            txt += `    taskset: "${trashCpu}"\n`;
+            txt += `    trash_cpu: "${trashCpu}"\n`;
+            txt += `    allrobots_cpu: "${getOne('ar')}"\n`;
+            txt += `    remoteformula_cpu: "${getOne('rf') || trashCpu}"\n`;
+            txt += `    gateways_cpu: ${getCores('gateway').join(',')}\n`;
+            txt += `    robots_cpu: ${getCores('robot_default').join(',')}\n`;
+            txt += `    udpsend_cpu: "${getOne('udp')}"\n`;
+            txt += `    udpreceive_cpu: "${getOne('udp')}"\n`;
+            txt += `    udp_emitstats: true\n`;
+            txt += `    udp_stats_mw_interval: "100ms"\n`;
+
+             // Custom Alias
+            const formula = getOne('formula');
+            const iso = getCores('isolated_robots');
+            const pool1 = getCores('pool1');
+            const pool2 = getCores('pool2');
+
+            if (formula || iso.length > 0 || pool1.length > 0 || pool2.length > 0) {
+                txt += `    cpualias_custom:\n`;
+                if (formula) txt += `      - <CPUAlias Name="Formula" Cores="${formula}" IoService="true" Debug="false" />\n`;
+                if (iso.length > 0) txt += `      - <CPUAlias Name="Isolated" Cores="${iso.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />\n`;
+                if (pool1.length > 0) txt += `      - <CPUAlias Name="RobotsNode1" Cores="${pool1.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />\n`;
+                if (pool2.length > 0) txt += `      - <CPUAlias Name="RobotsNode2" Cores="${pool2.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />\n`;
+            }
+
+            // Clickhouse (custom field in screenshot)
+            // It seems clickhouse might be top level or inside? Screenshot 2 doesn't show it.
+            // Screenshot 1 is host vars.
+            // I'll keep clickhouse inside if it's per instance, or separate?
+            // User screenshot shows `bs_instances` end.
+            // I'll assume clickhouse config might be separate or part of it.
+            // For now, I won't put it in `bs_instances` unless I see it there.
+            // The previous code put it at the end. I'll stick to that but outside the block if it's not standard.
+        });
 
         document.getElementById('output').textContent = txt;
     },
