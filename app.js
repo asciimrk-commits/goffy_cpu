@@ -191,7 +191,20 @@ const HFT = {
             // LSCPU parsing
             if (mode === 'lscpu') {
                 if (line.startsWith('CPU') || line.startsWith('#')) continue;
-                const parts = line.split(',');
+                let parts = line.split(',');
+
+                // Support space-separated lscpu -e output
+                if (parts.length < 5) {
+                    const spaces = line.trim().split(/\s+/);
+                    if (spaces.length >= 5) {
+                        // Assume format: CPU NODE SOCKET CORE CACHE ...
+                        // CACHE is often 0:0:0:0, we want the last digit
+                        const l3raw = spaces[4];
+                        const l3val = l3raw.includes(':') ? l3raw.split(':').pop() : l3raw;
+                        parts = [spaces[0], spaces[1], spaces[2], spaces[3], l3val];
+                    }
+                }
+
                 if (parts.length < 5) continue;
                 const [cpu, node, socket, , l3id] = parts.map(p => p.trim());
                 if (node === '-' || socket === '-') continue;
@@ -579,13 +592,23 @@ const HFT = {
 
         const tags = this.state.instances[instanceName][cpu];
 
-        if (isEraser) { tags.clear(); }
+        if (isEraser) {
+            // Eraser mode (Ctrl+Click): Clear ALL roles to make a "clean" core
+            tags.clear();
+            // Also remove from isolated set to ensure it's completely clean
+            if (this.state.isolatedCores.has(cpu)) this.state.isolatedCores.delete(cpu);
+        }
         else if (this.activeTool.id === 'isolated') {
+            // Toggle isolation
             if (this.state.isolatedCores.has(cpu)) this.state.isolatedCores.delete(cpu);
             else this.state.isolatedCores.add(cpu);
         }
-        else if (tags.has(this.activeTool.id) && !forceAdd) tags.delete(this.activeTool.id);
-        else tags.add(this.activeTool.id);
+        else {
+            // Paint mode: Add the selected role
+            // If checking 'has' to toggle:
+            if (tags.has(this.activeTool.id) && !forceAdd) tags.delete(this.activeTool.id);
+            else tags.add(this.activeTool.id);
+        }
 
         this.updateCoreVisual(instanceName, cpu);
         this.updateStats();
