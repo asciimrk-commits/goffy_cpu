@@ -66,6 +66,30 @@
                         </div>
                     </section>
 
+                    <!-- Instance Manager -->
+                    <section class="panel" id="instance-manager">
+                        <h3 class="panel-title">
+                            <svg class="panel-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
+                                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                                <line x1="8" y1="21" x2="16" y2="21" />
+                                <line x1="12" y1="17" x2="12" y2="21" />
+                            </svg>
+                            Instance Manager
+                        </h3>
+                        <div class="input-group">
+                            <select id="instance-select" class="input-area" style="height:32px;min-height:32px;"
+                                onchange="HFT.selectInstance(this.value)">
+                                <option value="Physical">Physical (System)</option>
+                            </select>
+                        </div>
+                        <div class="input-group" style="margin-top:8px;">
+                            <input type="text" id="new-instance-name" class="input-area"
+                                style="height:32px;min-height:32px;" placeholder="New Instance (e.g. HUB7)">
+                            <button class="btn btn-secondary" onclick="HFT.addInstance()">+</button>
+                        </div>
+                    </section>
+
                     <!-- Paint Tools -->
                     <section class="panel">
                         <h3 class="panel-title">
