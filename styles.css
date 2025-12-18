@@ -473,6 +473,8 @@ body {
 /* L3 Group */
 .l3 {
     margin-bottom: 8px;
+    border: 1px solid var(--border-light);
+    padding: 8px;
 }
 
 .l3:last-child {
