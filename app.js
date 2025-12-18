@@ -579,7 +579,15 @@ const HFT = {
 
         const tags = this.state.instances[instanceName][cpu];
 
-        if (isEraser) { tags.clear(); }
+        if (isEraser) {
+            // Global Clean: Remove this core from ALL instances and clear isolation
+            Object.keys(this.state.instances).forEach(inst => {
+                if (this.state.instances[inst][cpu]) {
+                    this.state.instances[inst][cpu].clear();
+                }
+            });
+            this.state.isolatedCores.delete(cpu);
+        }
         else if (this.activeTool.id === 'isolated') {
             if (this.state.isolatedCores.has(cpu)) this.state.isolatedCores.delete(cpu);
             else this.state.isolatedCores.add(cpu);
