@@ -6,13 +6,16 @@
 
 :root {
     /* Colors - Technical Slate Palette (Low Eye Strain) */
-    --bg-app: #181a1b;       /* Slightly softer black */
+    --bg-app: #181a1b;
+    /* Slightly softer black */
     --bg-sidebar: #202324;
     --bg-card: #202324;
     --bg-header: #202324;
-    --bg-panel: #2d3133;     /* Dark grey for inputs/panels */
+    --bg-panel: #2d3133;
+    /* Dark grey for inputs/panels */
 
-    --border-light: #454a4d; /* Distinct but not white */
+    --border-light: #454a4d;
+    /* Distinct but not white */
     --border-active: #6c757d;
 
     --text-primary: #e8eaed;
@@ -20,7 +23,8 @@
     --text-muted: #5f6368;
 
     /* Accents - Engineering Blue */
-    --accent: #64b5f6;       /* Softer blue */
+    --accent: #64b5f6;
+    /* Softer blue */
     --accent-hover: #42a5f5;
     --accent-light: rgba(100, 181, 246, 0.15);
 
@@ -32,18 +36,22 @@
 
     /* Layout */
     --sidebar-width: 280px;
-    --header-height: 56px; /* Compact header */
-    --radius: 0px;         /* STRICT: No rounded corners */
-    --shadow-sm: none;     /* STRICT: No shadows */
+    --header-height: 56px;
+    /* Compact header */
+    --radius: 0px;
+    /* STRICT: No rounded corners */
+    --shadow-sm: none;
+    /* STRICT: No shadows */
     --shadow-md: none;
 
-    /* Adaptive core sizing */
-    --core-size: 48px;
-    --core-font: 14px;
+    /* Adaptive core sizing - Larger for better visibility */
+    --core-size: 40px;
+    --core-font: 12px;
 
     /* Typography */
     --font-ui: 'Inter', sans-serif;
-    --font-mono: 'JetBrains Mono', monospace; /* Used more extensively */
+    --font-mono: 'JetBrains Mono', monospace;
+    /* Used more extensively */
 }
 
 *,
@@ -102,7 +110,8 @@ body {
     align-items: center;
     padding: 0 16px;
     border-bottom: 1px solid var(--border-light);
-    font-family: var(--font-mono); /* Tech font */
+    font-family: var(--font-mono);
+    /* Tech font */
 }
 
 .logo {
@@ -259,8 +268,10 @@ body {
 .palette {
     display: flex;
     flex-direction: column;
-    gap: 1px; /* Tighter list */
-    background: var(--border-light); /* Separator lines */
+    gap: 1px;
+    /* Tighter list */
+    background: var(--border-light);
+    /* Separator lines */
     border: 1px solid var(--border-light);
 }
 
@@ -296,7 +307,7 @@ body {
     width: 12px;
     height: 12px;
     margin-right: 10px;
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* Stats Box */
@@ -319,9 +330,21 @@ body {
     font-size: 11px;
 }
 
-.val-ok { color: var(--success); }
-.val-error { color: var(--error); margin-bottom: 4px; display: block; }
-.val-warn { color: var(--warning); margin-bottom: 4px; display: block; }
+.val-ok {
+    color: var(--success);
+}
+
+.val-error {
+    color: var(--error);
+    margin-bottom: 4px;
+    display: block;
+}
+
+.val-warn {
+    color: var(--warning);
+    margin-bottom: 4px;
+    display: block;
+}
 
 /* ===== MAIN AREA ===== */
 .main {
@@ -396,7 +419,9 @@ body {
     font-family: var(--font-mono);
 }
 
-.accent { color: var(--accent); }
+.accent {
+    color: var(--accent);
+}
 
 .header-subtitle {
     font-size: 10px;
@@ -441,10 +466,12 @@ body {
 /* Canvas Area */
 .canvas-wrapper {
     flex: 1;
-    padding: 16px; /* Reduced from 24px */
+    padding: 8px;
+    /* Minimal padding for max space usage */
     overflow-y: auto;
     background: var(--bg-app);
-    display: block; /* Allows grid to fill width */
+    display: block;
+    /* Allows grid to fill width */
 }
 
 /* DASHBOARD GRID LAYOUT */
@@ -452,20 +479,24 @@ body {
 .blueprint {
     display: flex;
     flex-wrap: wrap;
-    gap: 16px; /* Reduced from 24px */
+    gap: 4px;
+    /* Minimal gap */
     width: 100%;
-    align-items: flex-start;
+    align-items: stretch;
+    /* Make all sockets same height */
 }
 
 /* Socket Card */
 .socket {
     background: transparent;
     border: 1px solid var(--border-light);
-    padding: 0; /* Header separates content */
+    padding: 0;
+    /* Header separates content */
     display: flex;
     flex-direction: column;
-    flex: 1 1 300px; /* Reduced min width to allow tighter packing */
-    min-width: 300px;
+    flex: 1 1 auto;
+    /* Allow sockets to grow and fill space */
+    min-width: 400px;
 }
 
 .socket-label {
@@ -473,7 +504,8 @@ body {
     font-weight: 700;
     color: var(--text-primary);
     background: var(--bg-panel);
-    padding: 6px 10px; /* Reduced padding */
+    padding: 6px 10px;
+    /* Reduced padding */
     border-bottom: 1px solid var(--border-light);
     display: flex;
     justify-content: space-between;
@@ -482,10 +514,12 @@ body {
 }
 
 .socket-content {
-    padding: 8px; /* Reduced from 16px */
+    padding: 8px;
+    /* Reduced from 16px */
     display: flex;
     flex-direction: column;
-    gap: 8px; /* Reduced from 16px */
+    gap: 4px;
+    /* Reduced from 16px */
     background: var(--bg-card);
 }
 
@@ -493,17 +527,19 @@ body {
 .numa {
     border: 1px solid var(--border-light);
     background: rgba(255, 255, 255, 0.02);
-    /* GRID LAYOUT FOR L3s - The User Requirement */
+    /* GRID LAYOUT FOR L3s */
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); /* Reduced minmax for denser L3 packing */
-    gap: 8px; /* Reduced gap */
-    padding: 8px; /* Reduced padding */
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    /* Adaptive L3 packing */
+    gap: 4px;
+    padding: 4px;
     position: relative;
 }
 
 .numa.is-network {
     border-color: var(--warning);
-    background: rgba(253, 214, 99, 0.05); /* Subtle warning tint */
+    background: rgba(253, 214, 99, 0.05);
+    /* Subtle warning tint */
 }
 
 .numa-label {
@@ -517,7 +553,7 @@ body {
     align-items: center;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border-light);
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     font-family: var(--font-mono);
     text-transform: uppercase;
 }
@@ -534,7 +570,8 @@ body {
 /* L3 Group */
 .l3 {
     border: 1px solid var(--border-light);
-    padding: 4px; /* Reduced from 8px */
+    padding: 2px;
+    /* Reduced from 8px */
     background: var(--bg-app);
     display: flex;
     flex-direction: column;
@@ -553,14 +590,15 @@ body {
 /* Core Grid */
 .cores-grid {
     display: grid;
-    /* Adaptive columns for cores - adjusted for density */
-    grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
-    gap: 2px; /* Reduced gap */
+    /* Adaptive columns for cores - larger cores */
+    grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+    gap: 2px;
 }
 
 /* Core Cell */
 .core {
-    aspect-ratio: 1; /* Make strict square */
+    aspect-ratio: 1;
+    /* Make strict square */
     background: var(--bg-panel);
     border: 1px solid var(--border-light);
     display: flex;
@@ -568,6 +606,8 @@ body {
     justify-content: center;
     font-family: var(--font-mono);
     font-size: var(--core-font);
+    min-height: var(--core-size);
+    min-width: var(--core-size);
     color: var(--text-muted);
     cursor: pointer;
     position: relative;
@@ -589,25 +629,27 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
     pointer-events: none;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 .core:hover {
     border-color: var(--text-primary);
     z-index: 10;
-    transform: scale(1.1); /* Slight zoom but keep sharp */
-    box-shadow: 0 0 0 1px var(--bg-app); /* Pseudo border */
+    transform: scale(1.1);
+    /* Slight zoom but keep sharp */
+    box-shadow: 0 0 0 1px var(--bg-app);
+    /* Pseudo border */
 }
 
 .core.has-role {
     color: #fff;
     /* Border will be handled by inline style or generic override */
-    border-color: rgba(255,255,255,0.3);
+    border-color: rgba(255, 255, 255, 0.3);
 }
 
 .core.isolated {
     /* High contrast hatching for isolation */
-    background-image: linear-gradient(45deg, rgba(255,255,255,0.1) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.1) 75%, transparent 75%, transparent);
+    background-image: linear-gradient(45deg, rgba(255, 255, 255, 0.1) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.1) 75%, transparent 75%, transparent);
     background-size: 4px 4px;
 }
 
@@ -618,7 +660,8 @@ body {
     width: 4px;
     height: 4px;
     background: var(--error);
-    border-radius: 0; /* Square dot */
+    border-radius: 0;
+    /* Square dot */
 }
 
 .load-bar {
@@ -627,7 +670,7 @@ body {
     left: 0;
     right: 0;
     height: 3px;
-    background: rgba(255,255,255,0.1);
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .load-fill {
@@ -667,7 +710,8 @@ body {
     pointer-events: none;
     z-index: 1000;
     display: none;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5); /* Keep shadow only for floating element visibility */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    /* Keep shadow only for floating element visibility */
     font-family: var(--font-mono);
 }
 
@@ -788,7 +832,7 @@ body {
     gap: 8px;
     padding: 8px;
     border: 1px solid var(--border-light);
-    background: rgba(255,255,255,0.02);
+    background: rgba(255, 255, 255, 0.02);
 }
 
 .cmp-numa-hdr {
@@ -991,7 +1035,8 @@ body {
 .commands-modal-content {
     background: var(--bg-card);
     border: 1px solid var(--border-light);
-    border-radius: 0; /* Strict */
+    border-radius: 0;
+    /* Strict */
     max-width: 800px;
     width: 100%;
     max-height: 90vh;
@@ -1255,4 +1300,61 @@ body {
 
 .opt-rec-item:last-child {
     margin-bottom: 0;
+}
+
+/* ===== RESPONSIVE BREAKPOINTS ===== */
+
+/* Large screens - maximize space */
+@media (min-width: 1600px) {
+    :root {
+        --core-size: 44px;
+        --core-font: 13px;
+    }
+
+    .cores-grid {
+        grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+    }
+
+    .socket {
+        flex: 1 1 calc(50% - 4px);
+        max-width: calc(50% - 2px);
+    }
+}
+
+/* Extra large screens */
+@media (min-width: 2000px) {
+    :root {
+        --core-size: 48px;
+        --core-font: 14px;
+    }
+
+    .cores-grid {
+        grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+    }
+}
+
+/* Medium screens */
+@media (max-width: 1400px) {
+    .socket {
+        flex: 1 1 100%;
+        max-width: 100%;
+    }
+}
+
+/* Small screens */
+@media (max-width: 1000px) {
+    :root {
+        --core-size: 36px;
+        --core-font: 11px;
+    }
+
+    .sidebar {
+        position: absolute;
+        height: 100vh;
+        z-index: 100;
+    }
+
+    .sidebar.collapsed {
+        margin-left: calc(var(--sidebar-width) * -1);
+    }
 }
