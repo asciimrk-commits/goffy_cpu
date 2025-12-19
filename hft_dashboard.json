@@ -1,0 +1,1055 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Critical HFT Indicators & Anomalies",
+      "type": "row"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Packet drops at NIC level (net_drop_in) and UDP Socket Buffer errors (RcvbufErrors). Any value > 0 is critical for HFT.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "id": 101,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "rate(net_drop_in{host=\"$host\"}[$interval])",
+          "legendFormat": "NIC Drops In ({{interface}})",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "rate(nstat_UdpRcvbufErrors{host=\"$host\"}[$interval])",
+          "legendFormat": "UDP RcvBuf Errors",
+          "refId": "B"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "rate(nstat_UdpInErrors{host=\"$host\"}[$interval])",
+          "legendFormat": "UDP In Errors",
+          "refId": "C"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "bs_md_source_rejected_updates_rps{bs=\"$bs\"}",
+          "legendFormat": "App MD Rejected",
+          "refId": "D"
+        }
+      ],
+      "title": "Network Drops & Errors (Anomalies)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "High CPU SoftIRQ indicates heavy packet processing load. Context switches kill latency.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 5000
+              },
+              {
+                "color": "red",
+                "value": 10000
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "SoftIRQ"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Context"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "id": 102,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "max(cpu_usage_softirq{host=\"$host\"}) by (cpu)",
+          "legendFormat": "SoftIRQ Core {{cpu}} (Max)",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "rate(kernel_context_switches{host=\"$host\"}[$interval])",
+          "legendFormat": "Context Switches",
+          "refId": "B"
+        }
+      ],
+      "title": "System Latency Killers (SoftIRQ & CS)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Internal application queues. Growing queues indicate bottlenecks.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "id": 103,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "bs_queue_size{bs=\"$bs\"}",
+          "legendFormat": "Main Queue",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "bs_tcp_queue_size{bs=\"$bs\"}",
+          "legendFormat": "TCP Queue",
+          "refId": "B"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "deals_stream_metrics_realtime_queue_size{bs=\"$bs\"}",
+          "legendFormat": "Deals Queue",
+          "refId": "C"
+        }
+      ],
+      "title": "Internal Queues (Backpressure)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 200,
+      "panels": [],
+      "title": "Bender Execution Pipeline (Detailed Analysis)",
+      "type": "row"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Time from receiving raw packet at Gateway to Publishing to Internal Bus.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            },
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "µs"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 10
+      },
+      "id": 201,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(1.0, bender_metrics_book_delay_gw_to_publisher_raw{bs=\"$bs\", gateway=\"$gateway\"}[$interval])",
+          "legendFormat": "Max",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(0.99, bender_metrics_book_delay_gw_to_publisher_raw{bs=\"$bs\", gateway=\"$gateway\"}[$interval])",
+          "legendFormat": "P99",
+          "refId": "B"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(0.50, bender_metrics_book_delay_gw_to_publisher_raw{bs=\"$bs\", gateway=\"$gateway\"}[$interval])",
+          "legendFormat": "P50",
+          "refId": "C"
+        }
+      ],
+      "title": "1. Gateway -> Publisher",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Time from Publisher to Robot (Wakeup)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            },
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "µs"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 10
+      },
+      "id": 202,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(1.0, bender_metrics_publisher_to_robot_book_delay_raw{bs=\"$bs\"}[$interval])",
+          "legendFormat": "Max",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(0.99, bender_metrics_publisher_to_robot_book_delay_raw{bs=\"$bs\"}[$interval])",
+          "legendFormat": "P99",
+          "refId": "B"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(0.50, bender_metrics_publisher_to_robot_book_delay_raw{bs=\"$bs\"}[$interval])",
+          "legendFormat": "P50",
+          "refId": "C"
+        }
+      ],
+      "title": "2. Publisher -> Robot",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Robot Logic Cycle Time (Strategy Calculation)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            },
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "ns"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 10
+      },
+      "id": 203,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(1.0, bender_metrics_robot_timings_metrics_cycle_raw{bs=\"$bs\", robot=\"$robot\"}[$interval])",
+          "legendFormat": "Max",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(0.99, bender_metrics_robot_timings_metrics_cycle_raw{bs=\"$bs\", robot=\"$robot\"}[$interval])",
+          "legendFormat": "P99",
+          "refId": "B"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(0.50, bender_metrics_robot_timings_metrics_cycle_raw{bs=\"$bs\", robot=\"$robot\"}[$interval])",
+          "legendFormat": "P50",
+          "refId": "C"
+        }
+      ],
+      "title": "3. Robot Cycle Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Time to send order to execution thread",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            },
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "µs"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 10
+      },
+      "id": 204,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(1.0, bender_metrics_internal_exec_delays_execth_sent_raw{bs=\"$bs\"}[$interval])",
+          "legendFormat": "Max",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(0.99, bender_metrics_internal_exec_delays_execth_sent_raw{bs=\"$bs\"}[$interval])",
+          "legendFormat": "P99",
+          "refId": "B"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "quantile_over_time(0.50, bender_metrics_internal_exec_delays_execth_sent_raw{bs=\"$bs\"}[$interval])",
+          "legendFormat": "P50",
+          "refId": "C"
+        }
+      ],
+      "title": "4. Order Send Latency",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 300,
+      "panels": [],
+      "title": "Network & System Deep Dive",
+      "type": "row"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Network traffic volume. Asymmetric patterns or sudden drops indicate issues.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Sent"
+            },
+            "properties": [
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 19
+      },
+      "id": 301,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "rate(net_bytes_recv{host=\"$host\"}[$interval])",
+          "legendFormat": "Received ({{interface}})",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "rate(net_bytes_sent{host=\"$host\"}[$interval])",
+          "legendFormat": "Sent ({{interface}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Network Traffic (Bytes/sec)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Packets Per Second (PPS). High PPS is a stress test for SoftIRQ.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "pps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 19
+      },
+      "id": 304,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "rate(net_packets_recv{host=\"$host\"}[$interval])",
+          "legendFormat": "Pkts Recv ({{interface}})",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "rate(net_packets_sent{host=\"$host\"}[$interval])",
+          "legendFormat": "Pkts Sent ({{interface}})",
+          "refId": "B"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "bs_udp_traffic_pps{bs=\"$bs\"}",
+          "legendFormat": "App UDP PPS",
+          "refId": "C"
+        }
+      ],
+      "title": "Packet Rate (PPS)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Detailed System CPU Usage. Identifying 'User' (App), 'System' (Kernel), 'SoftIRQ' (Network), and 'IOWait' (Disk) bottlenecks.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 19
+      },
+      "id": 303,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": "${datasource}",
+          "expr": "avg(cpu_usage_user{host=\"$host\"})",
+          "legendFormat": "User",
+          "refId": "A"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "avg(cpu_usage_system{host=\"$host\"})",
+          "legendFormat": "System",
+          "refId": "B"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "avg(cpu_usage_softirq{host=\"$host\"})",
+          "legendFormat": "SoftIRQ",
+          "refId": "C"
+        },
+        {
+          "datasource": "${datasource}",
+          "expr": "avg(cpu_usage_iowait{host=\"$host\"})",
+          "legendFormat": "IOWait",
+          "refId": "D"
+        }
+      ],
+      "title": "System CPU Usage",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "HFT",
+    "Bender",
+    "Performance"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "${datasource}",
+        "definition": "label_values(cpu_usage_system, host)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Host (System)",
+        "multi": false,
+        "name": "host",
+        "options": [],
+        "query": {
+          "query": "label_values(cpu_usage_system, host)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "${datasource}",
+        "definition": "label_values(bender_metrics_book_delay_gw_to_publisher_raw, bs)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Bender Instance (BS)",
+        "multi": false,
+        "name": "bs",
+        "options": [],
+        "query": {
+          "query": "label_values(bender_metrics_book_delay_gw_to_publisher_raw, bs)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "${datasource}",
+        "definition": "label_values(bender_metrics_book_delay_gw_to_publisher_raw{bs=\"$bs\"}, gateway)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Gateway",
+        "multi": false,
+        "name": "gateway",
+        "options": [],
+        "query": {
+          "query": "label_values(bender_metrics_book_delay_gw_to_publisher_raw{bs=\"$bs\"}, gateway)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "${datasource}",
+        "definition": "label_values(bender_metrics_robot_timings_metrics_pre_cycle_raw{bs=\"$bs\"}, robot)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Robot",
+        "multi": false,
+        "name": "robot",
+        "options": [],
+        "query": {
+          "query": "label_values(bender_metrics_robot_timings_metrics_pre_cycle_raw{bs=\"$bs\"}, robot)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "auto": false,
+        "auto_count": 30,
+        "auto_min": "10s",
+        "current": {
+          "selected": true,
+          "text": "1m",
+          "value": "1m"
+        },
+        "hide": 0,
+        "label": "Interval",
+        "name": "interval",
+        "options": [
+          {
+            "selected": true,
+            "text": "1m",
+            "value": "1m"
+          },
+          {
+            "selected": false,
+            "text": "5m",
+            "value": "5m"
+          },
+          {
+            "selected": false,
+            "text": "10m",
+            "value": "10m"
+          },
+          {
+            "selected": false,
+            "text": "30m",
+            "value": "30m"
+          },
+          {
+            "selected": false,
+            "text": "1h",
+            "value": "1h"
+          }
+        ],
+        "query": "1m,5m,10m,30m,1h",
+        "refresh": 2,
+        "skipUrlSync": false,
+        "type": "interval"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "HFT Performance & System Health (Bender)",
+  "uid": "hft_optimizer_v1",
+  "version": 1,
+  "weekStart": ""
+}
