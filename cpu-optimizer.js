@@ -54,7 +54,7 @@ const CPU_OPTIMIZER = {
         // 2. Рассчитать потребности инстансов (Needs Calculation)
         // Сортируем инстансы по нагрузке ("Big" -> "Small")
         const instancePlans = instances.map(inst => this.calculateInstanceNeeds(inst, snapshot))
-                                       .sort((a, b) => b.priorityScore - a.priorityScore);
+            .sort((a, b) => b.priorityScore - a.priorityScore);
 
         // 3. Расчет IRQ (1 ядро на 4 гейта)
         // irq - на сетевой ноде (если она не одна то на каждой в зависимости от кол-ва гейтов на ноде)
@@ -180,6 +180,36 @@ const CPU_OPTIMIZER = {
         const topology = this.analyzeTopology(snapshot);
         const netNumas = topology.networkNumas; // Array of NUMA IDs
 
+        // Pre-calculate Instance -> NUMA mapping (Round Robin)
+        const instanceNumaTarget = {};
+        const instances = allocations.map(a => a.instanceId).filter(id => id !== 'SYSTEM');
+
+        // Sort instances to ensure deterministic assignment
+        instances.sort();
+
+        instances.forEach((inst, idx) => {
+            // Check if there's an explicit interface mapping firsts
+            const existingMapping = this.getInstanceNetNuma(inst, topology);
+
+            // If the default logic returned the first node (default fallback),
+            // we override it with our round-robin logic ONLY if we have multiple nodes
+            // and no explicit interface binding prevents it.
+            // Note: getInstanceNetNuma checks interfaceNumaMap. If that returns valid, we keep it.
+            // If it falls back to networkNumas[0], we apply round-robin.
+
+            const iface = topology.instanceToInterface[inst];
+            const hasExplicitBinding = iface && topology.interfaceNumaMap[iface] !== undefined;
+
+            if (hasExplicitBinding) {
+                instanceNumaTarget[inst] = existingMapping;
+            } else if (netNumas.length > 0) {
+                // Round Robin
+                instanceNumaTarget[inst] = netNumas[idx % netNumas.length];
+            } else {
+                instanceNumaTarget[inst] = 0; // Fallback
+            }
+        });
+
         // Prepare grid
         const coreMap = {}; // coreId -> { service, instance }
         const freeCores = new Set(snapshot.topology.map(c => c.id));
@@ -217,14 +247,14 @@ const CPU_OPTIMIZER = {
             tasks.push({ type: 'trash_combo', instance: alloc.instanceId, mustBeNet: true, priority: 1000 });
 
             // High Value
-            for(let i=0; i<alloc.assigned.gateway; i++)
+            for (let i = 0; i < alloc.assigned.gateway; i++)
                 tasks.push({ type: 'gateway', instance: alloc.instanceId, netBonus: 500, priority: 500 });
 
-            for(let i=0; i<alloc.assigned.ar_combo; i++)
+            for (let i = 0; i < alloc.assigned.ar_combo; i++)
                 tasks.push({ type: 'ar_combo', instance: alloc.instanceId, netBonus: 200, priority: 200 });
 
             // Standard
-            for(let i=0; i<alloc.assigned.robot; i++)
+            for (let i = 0; i < alloc.assigned.robot; i++)
                 tasks.push({ type: 'robot', instance: alloc.instanceId, netBonus: 100, priority: 100 });
         });
 
@@ -238,7 +268,20 @@ const CPU_OPTIMIZER = {
 
         // Helper: Get best available core
         const getBestCore = (task) => {
-            const instanceNetNuma = this.getInstanceNetNuma(task.instance, topology);
+            // Determine the target Network NUMA for this task's instance
+            let instanceNetNuma;
+
+            if (task.instance === 'SYSTEM') {
+                // For SYSTEM (IRQs), we want to balance across ALL network nodes if possible.
+                // Or just pick any network node with free space.
+                // Simple strategy: Pick a network node that has the most free cores?
+                // Or just Iterate network nodes.
+                // For now, let's just say "Any Network Node is 1000 points".
+                instanceNetNuma = -1; // Special flag for "Any Network Node"
+            } else {
+                instanceNetNuma = instanceNumaTarget[task.instance];
+                if (instanceNetNuma === undefined) instanceNetNuma = this.getInstanceNetNuma(task.instance, topology);
+            }
 
             // Candidates: All free cores
             const candidates = Array.from(freeCores).map(id => {
@@ -251,7 +294,15 @@ const CPU_OPTIMIZER = {
             // Score each candidate
             const scored = candidates.map(c => {
                 let score = 0;
-                const isNet = c.numaNodeId === instanceNetNuma;
+                let isNet = false;
+
+                if (task.instance === 'SYSTEM' && task.mustBeNet) {
+                    // Check if core is on ANY network node
+                    isNet = netNumas.includes(c.numaNodeId);
+                } else {
+                    // Check against specific target NUMA
+                    isNet = c.numaNodeId === instanceNetNuma;
+                }
 
                 // Hard Constraints
                 if (task.mustBeNet && !isNet) score = -10000;
@@ -260,10 +311,11 @@ const CPU_OPTIMIZER = {
                 // Bonuses
                 if (task.netBonus && isNet) score += task.netBonus;
 
-                // L3 Affinity (Hot/Cold) separation preference
-                // Simple heuristic: If core is in "Service L3", favor Trash/IRQ/UDP.
-                // If "Hot L3", favor Gateway/Robot.
-                // We need to dynamically track L3 usage. For now, simple Net affinity is dominant.
+                // Penalty for cross-NUMA placement if we have a target?
+                // If we are placing a Robot (priority 100) and the target NUMA is full,
+                // we should allow placing on another NUMA but with lower score.
+                // The current logic gives 0 base score if not "mustBeNet".
+                // So if we place on non-target, we just miss the bonus. That is correct.
 
                 return { core: c, score };
             });
@@ -413,7 +465,7 @@ const CPU_OPTIMIZER = {
         // Generate text advice based on changes
         const recs = [];
         instances.forEach(inst => {
-           // Simple change detection logic could go here
+            // Simple change detection logic could go here
         });
         return recs;
     }
