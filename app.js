@@ -46,14 +46,18 @@ const HFT = {
 
     updateInstanceSelect() {
         const select = document.getElementById('instance-select');
-        if (!select) return;
-        select.innerHTML = '';
-        Object.keys(this.state.instances).forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name === 'Physical' ? 'Physical (System)' : name;
-            opt.selected = name === this.state.selectedInstance;
-            select.appendChild(opt);
+        const ansibleSelect = document.getElementById('ansible-instance-select');
+
+        [select, ansibleSelect].forEach(sel => {
+            if (!sel) return;
+            sel.innerHTML = '';
+            Object.keys(this.state.instances).forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name === 'Physical' ? 'Physical (System)' : name;
+                opt.selected = name === this.state.selectedInstance;
+                sel.appendChild(opt);
+            });
         });
     },
 
@@ -184,7 +188,7 @@ const HFT = {
     parse(text) {
         // Preserve selected instance if it exists in the new parse, otherwise Physical
         const currentSelection = this.state && this.state.selectedInstance ? this.state.selectedInstance : 'Physical';
-        
+
         this.state = {
             serverName: '', geometry: {}, coreNumaMap: {}, l3Groups: {},
             netNumaNodes: new Set(), isolatedCores: new Set(), coreIRQMap: {},
@@ -415,7 +419,7 @@ const HFT = {
         } else {
             this.state.selectedInstance = 'Physical';
         }
-        
+
         // Refresh instance selector
         this.updateInstanceSelect();
 
@@ -599,7 +603,7 @@ const HFT = {
             }
         });
         if (activeInst) {
-             el.querySelector('.core-label').textContent = activeInst;
+            el.querySelector('.core-label').textContent = activeInst;
         }
 
         if (fillTags.length > 0) el.classList.add('has-role');
@@ -788,12 +792,12 @@ const HFT = {
         // Iterate over all instances (skipping 'Physical')
         // If only 'Physical' exists, we might treat it as a default instance if it has services assigned
         const instances = Object.keys(this.state.instances).filter(k => k !== 'Physical');
-        
+
         // If no explicit instances, check if Physical has services that imply an instance
         if (instances.length === 0) {
             // Fallback: Create one instance named after server or default
-             const instanceName = this.state.serverName?.toUpperCase() || 'INSTANCE';
-             instances.push(instanceName);
+            const instanceName = this.state.serverName?.toUpperCase() || 'INSTANCE';
+            instances.push(instanceName);
         }
 
         instances.forEach((instName, idx) => {
@@ -802,7 +806,7 @@ const HFT = {
             const sourceInst = this.state.instances[instName] ? instName : 'Physical';
 
             Object.entries(this.state.instances[sourceInst] || {}).forEach(([cpu, tags]) => {
-                 tags.forEach(t => {
+                tags.forEach(t => {
                     if (!instRoles[t]) instRoles[t] = [];
                     instRoles[t].push(parseInt(cpu));
                 });
@@ -819,8 +823,8 @@ const HFT = {
                 if (numa !== undefined) membind = String(numa);
             }
             if (!membind) {
-                 // Fallback: all NUMAs
-                 membind = [...new Set(Object.values(Object.fromEntries(this.state.coreNumaMap)))].sort().join(',');
+                // Fallback: all NUMAs
+                membind = [...new Set(Object.values(Object.fromEntries(this.state.coreNumaMap)))].sort().join(',');
             }
 
             txt += `  ${instName}:\n`;
@@ -840,7 +844,7 @@ const HFT = {
             txt += `    udp_emitstats: true\n`;
             txt += `    udp_stats_mw_interval: "100ms"\n`;
 
-             // Custom Alias
+            // Custom Alias
             const formula = getOne('formula');
             const iso = getCores('isolated_robots');
             const pool1 = getCores('pool1');
@@ -865,6 +869,9 @@ const HFT = {
         });
 
         document.getElementById('output').textContent = txt;
+
+        // Update Ansible export preview
+        this.updateAnsiblePreview();
     },
 
     formatCoreRange(cores) {
@@ -912,29 +919,254 @@ const HFT = {
     // =========================================================================
     // EXPORT / IMPORT
     // =========================================================================
-    copyConfig() { navigator.clipboard.writeText(document.getElementById('output')?.textContent || ''); },
+    copyConfig() {
+        const text = document.getElementById('output')?.textContent || '';
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = document.querySelector('button[onclick="HFT.copyConfig()"]');
+            if (btn) {
+                const original = btn.innerHTML;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.innerHTML = original, 1000);
+            }
+        }).catch(err => {
+            console.error('Copy failed:', err);
+            alert('Copy failed: ' + err);
+        });
+    },
 
     exportConfig() {
-        const config = {
-            version: '4.5',
-            serverName: this.state.serverName,
-            timestamp: new Date().toISOString(),
-            geometry: this.state.geometry,
-            netNumaNodes: [...this.state.netNumaNodes],
-            isolatedCores: [...this.state.isolatedCores],
-            instances: {}
-        };
-        Object.keys(this.state.instances).forEach(instName => {
-            config.instances[instName] = {};
-            Object.keys(this.state.instances[instName]).forEach(cpu => {
-                config.instances[instName][cpu] = [...this.state.instances[instName][cpu]];
+        try {
+            const config = {
+                version: '4.5',
+                serverName: this.state.serverName,
+                timestamp: new Date().toISOString(),
+                geometry: this.state.geometry,
+                netNumaNodes: [...this.state.netNumaNodes],
+                isolatedCores: [...this.state.isolatedCores],
+                instances: {}
+            };
+            Object.keys(this.state.instances).forEach(instName => {
+                config.instances[instName] = {};
+                Object.keys(this.state.instances[instName]).forEach(cpu => {
+                    config.instances[instName][cpu] = [...this.state.instances[instName][cpu]];
+                });
+            });
+            const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `cpu-config-${this.state.serverName || 'unknown'}-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            console.error('Export failed:', e);
+            alert('Export failed: ' + e.message);
+        }
+    },
+
+    // =========================================================================
+    // ANSIBLE EXPORT - Generate YAML-compatible output for Ansible configs
+    // =========================================================================
+
+    /**
+     * Generate Ansible-compatible instance config (bender_instances.yml format)
+     * @param {string} instanceName - Name of the instance to export
+     * @returns {string} YAML-formatted config
+     */
+    generateAnsibleInstanceConfig(instanceName) {
+        if (!instanceName || instanceName === 'Physical') {
+            // Use first non-Physical instance or fallback
+            const instances = Object.keys(this.state.instances).filter(k => k !== 'Physical');
+            instanceName = instances[0] || 'INSTANCE';
+        }
+
+        const instRoles = {};
+        const sourceInst = this.state.instances[instanceName] || this.state.instances.Physical || {};
+
+        Object.entries(sourceInst).forEach(([cpu, tags]) => {
+            tags.forEach(t => {
+                if (!instRoles[t]) instRoles[t] = [];
+                instRoles[t].push(parseInt(cpu));
             });
         });
-        const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `cpu-config-${this.state.serverName || 'unknown'}-${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
+
+        const getCores = (role) => (instRoles[role] || []).sort((a, b) => a - b);
+        const getOne = (role) => getCores(role)[0] ?? '';
+
+        const trashCpu = getOne('trash');
+        const udpCpu = getOne('udp');
+        const arCpu = getOne('ar');
+        const rfCpu = getOne('rf') || trashCpu;
+        const formulaCpu = getOne('formula');
+        const gatewayCores = getCores('gateway');
+        const robotDefaultCores = getCores('robot_default');
+        const isolatedRobotCores = getCores('isolated_robots');
+        const pool1Cores = getCores('pool1');
+        const pool2Cores = getCores('pool2');
+
+        let txt = '';
+        txt += `    taskset: ${trashCpu}\n`;
+        txt += `    trash_cpu: ${trashCpu}\n`;
+        txt += `    allrobots_cpu: ${arCpu}\n`;
+        txt += `    remoteformula_cpu: ${rfCpu}\n`;
+        txt += `    gateways_cpu: ${gatewayCores.join(',')}\n`;
+        txt += `    robots_cpu: ${robotDefaultCores.join(',')}\n`;
+        txt += `    udpsend_cpu: ${udpCpu}\n`;
+        txt += `    udpreceive_cpu: ${udpCpu}\n`;
+
+        // CPUAlias custom section
+        const aliases = [];
+        if (formulaCpu !== '') {
+            aliases.push(`      - <CPUAlias Name="Formula" Cores="${formulaCpu}" IoService="true" Debug="false" />`);
+        }
+        if (isolatedRobotCores.length > 0) {
+            aliases.push(`      - <CPUAlias Name="Isolated" Cores="${isolatedRobotCores.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />`);
+        }
+        if (pool1Cores.length > 0) {
+            aliases.push(`      - <CPUAlias Name="RobotsNode1" Cores="${pool1Cores.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />`);
+        }
+        if (pool2Cores.length > 0) {
+            aliases.push(`      - <CPUAlias Name="RobotsNode2" Cores="${pool2Cores.join(',')}" Pool="1" Priority="10" SchedPolicy="FIFO" />`);
+        }
+
+        if (aliases.length > 0) {
+            txt += `    cpualias_custom:\n`;
+            txt += aliases.join('\n') + '\n';
+        }
+
+        return txt;
+    },
+
+    /**
+     * Generate Ansible-compatible host vars (vars.yml format)
+     * @returns {string} YAML-formatted host vars
+     */
+    generateAnsibleHostVars() {
+        let txt = '';
+
+        // isol_cpus - all isolated cores as range
+        const isolatedCores = [...this.state.isolatedCores].map(c => parseInt(c)).sort((a, b) => a - b);
+        if (isolatedCores.length > 0) {
+            txt += `isol_cpus: ${this.formatCoreRange(isolatedCores)}\n`;
+        }
+
+        // irqaffinity_cpus - non-isolated cores (sys_os)
+        const physicalRoles = {};
+        Object.entries(this.state.instances.Physical || {}).forEach(([cpu, tags]) => {
+            tags.forEach(t => {
+                if (!physicalRoles[t]) physicalRoles[t] = [];
+                physicalRoles[t].push(parseInt(cpu));
+            });
+        });
+        const sysCores = (physicalRoles['sys_os'] || []).sort((a, b) => a - b);
+        if (sysCores.length > 0) {
+            txt += `irqaffinity_cpus: ${this.formatCoreRange(sysCores)}\n`;
+        }
+
+        // net_cpus - IRQ cores grouped by interface
+        const netCores = (physicalRoles['net_irq'] || []).sort((a, b) => a - b);
+        if (netCores.length > 0) {
+            txt += `net_cpus:\n`;
+            // Use collected network interfaces or fallback to generic names
+            const netInterfaces = this.state.networkInterfaces || [];
+            if (netInterfaces.length > 0) {
+                // Group interfaces by NUMA node
+                const numaGroups = {};
+                netInterfaces.forEach(iface => {
+                    const numa = iface.numaNode?.toString() || '0';
+                    if (!numaGroups[numa]) numaGroups[numa] = [];
+                    numaGroups[numa].push(iface.name || iface);
+                });
+
+                // Get cores for each NUMA
+                Object.entries(numaGroups).forEach(([numa, interfaces]) => {
+                    const numaCores = netCores.filter(c =>
+                        this.state.coreNumaMap[c.toString()] === numa
+                    );
+                    if (numaCores.length > 0) {
+                        interfaces.forEach(ifaceName => {
+                            txt += `  ${ifaceName}: [${numaCores.join(', ')}]\n`;
+                        });
+                    }
+                });
+            } else {
+                // Fallback: generic net0, net1
+                txt += `  net0: [${netCores.join(', ')}]\n`;
+                txt += `  net1: [${netCores.join(', ')}]\n`;
+            }
+        }
+
+        return txt;
+    },
+
+    /**
+     * Copy instance config to clipboard
+     */
+    copyAnsibleInstanceConfig() {
+        const instanceSelect = document.getElementById('ansible-instance-select');
+        const instanceName = instanceSelect?.value || this.state.selectedInstance;
+        const text = this.generateAnsibleInstanceConfig(instanceName);
+
+        if (!text.trim()) {
+            alert('No instance config to copy. Please assign cores first.');
+            return;
+        }
+
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = document.querySelector('button[onclick="HFT.copyAnsibleInstanceConfig()"]');
+            if (btn) {
+                const original = btn.innerHTML;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.innerHTML = original, 1000);
+            }
+        }).catch(err => {
+            console.error('Copy failed:', err);
+            alert('Copy failed: ' + err);
+        });
+    },
+
+    /**
+     * Copy host vars to clipboard
+     */
+    copyAnsibleHostVars() {
+        const text = this.generateAnsibleHostVars();
+
+        if (!text.trim()) {
+            alert('No host vars to copy. Please load data first.');
+            return;
+        }
+
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = document.querySelector('button[onclick="HFT.copyAnsibleHostVars()"]');
+            if (btn) {
+                const original = btn.innerHTML;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.innerHTML = original, 1000);
+            }
+        }).catch(err => {
+            console.error('Copy failed:', err);
+            alert('Copy failed: ' + err);
+        });
+    },
+
+    /**
+     * Update Ansible export preview
+     */
+    updateAnsiblePreview() {
+        const instanceSelect = document.getElementById('ansible-instance-select');
+        const instanceName = instanceSelect?.value || this.state.selectedInstance;
+        const preview = document.getElementById('ansible-output');
+
+        if (!preview) return;
+
+        let txt = '# Instance Config (bender_instances.yml)\n';
+        txt += this.generateAnsibleInstanceConfig(instanceName);
+        txt += '\n# Host Vars (vars.yml)\n';
+        txt += this.generateAnsibleHostVars();
+
+        preview.textContent = txt;
     },
 
     importConfig() {
@@ -1803,9 +2035,9 @@ const HFT = {
                         rolesToApply.push('robot_default'); // Default, specific pools logic removed for simplicity or handled by optimizer tiering
                     }
                     else if (svc === 'trash_combo') {
-                         rolesToApply.push('trash');
-                         rolesToApply.push('click');
-                         rolesToApply.push('rf');
+                        rolesToApply.push('trash');
+                        rolesToApply.push('click');
+                        rolesToApply.push('rf');
                     }
                     else if (svc === 'ar_combo') {
                         rolesToApply.push('ar');
