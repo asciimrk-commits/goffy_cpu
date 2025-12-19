@@ -486,7 +486,7 @@
     },
     {
       "datasource": "${datasource}",
-      "description": "Robot Logic Cycle Time (Strategy Calculation)",
+      "description": "Robot Logic Cycle Time (Strategy Calculation). Showing worst-case robots.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -522,24 +522,18 @@
       "targets": [
         {
           "datasource": "${datasource}",
-          "expr": "quantile_over_time(1.0, bender_metrics_robot_timings_metrics_cycle_raw{bs=\"$bs\", robot=\"$robot\"}[$interval])",
-          "legendFormat": "Max",
+          "expr": "topk(5, max by (robot) (quantile_over_time(1.0, bender_metrics_robot_timings_metrics_cycle_raw{bs=\"$bs\"}[$interval])))",
+          "legendFormat": "{{robot}} (Max)",
           "refId": "A"
         },
         {
           "datasource": "${datasource}",
-          "expr": "quantile_over_time(0.99, bender_metrics_robot_timings_metrics_cycle_raw{bs=\"$bs\", robot=\"$robot\"}[$interval])",
-          "legendFormat": "P99",
+          "expr": "topk(5, max by (robot) (quantile_over_time(0.99, bender_metrics_robot_timings_metrics_cycle_raw{bs=\"$bs\"}[$interval])))",
+          "legendFormat": "{{robot}} (P99)",
           "refId": "B"
-        },
-        {
-          "datasource": "${datasource}",
-          "expr": "quantile_over_time(0.50, bender_metrics_robot_timings_metrics_cycle_raw{bs=\"$bs\", robot=\"$robot\"}[$interval])",
-          "legendFormat": "P50",
-          "refId": "C"
         }
       ],
-      "title": "3. Robot Cycle Time",
+      "title": "3. Robot Cycle Time (Top 5 Slowest)",
       "type": "timeseries"
     },
     {
@@ -931,7 +925,7 @@
           "value": "$__all"
         },
         "datasource": "${datasource}",
-        "definition": "label_values(bender_metrics_book_delay_gw_to_publisher_raw, bs)",
+        "definition": "label_values(bender_metrics_book_delay_gw_to_publisher_raw{host=\"$host\"}, bs)",
         "hide": 0,
         "includeAll": true,
         "label": "Bender Instance (BS)",
@@ -939,7 +933,7 @@
         "name": "bs",
         "options": [],
         "query": {
-          "query": "label_values(bender_metrics_book_delay_gw_to_publisher_raw, bs)",
+          "query": "label_values(bender_metrics_book_delay_gw_to_publisher_raw{host=\"$host\"}, bs)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
@@ -955,7 +949,7 @@
           "value": "$__all"
         },
         "datasource": "${datasource}",
-        "definition": "label_values(bender_metrics_book_delay_gw_to_publisher_raw{bs=\"$bs\"}, gateway)",
+        "definition": "label_values(bender_metrics_book_delay_gw_to_publisher_raw{host=\"$host\", bs=\"$bs\"}, gateway)",
         "hide": 0,
         "includeAll": true,
         "label": "Gateway",
@@ -963,31 +957,7 @@
         "name": "gateway",
         "options": [],
         "query": {
-          "query": "label_values(bender_metrics_book_delay_gw_to_publisher_raw{bs=\"$bs\"}, gateway)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": "${datasource}",
-        "definition": "label_values(bender_metrics_robot_timings_metrics_pre_cycle_raw{bs=\"$bs\"}, robot)",
-        "hide": 0,
-        "includeAll": true,
-        "label": "Robot",
-        "multi": false,
-        "name": "robot",
-        "options": [],
-        "query": {
-          "query": "label_values(bender_metrics_robot_timings_metrics_pre_cycle_raw{bs=\"$bs\"}, robot)",
+          "query": "label_values(bender_metrics_book_delay_gw_to_publisher_raw{host=\"$host\", bs=\"$bs\"}, gateway)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
