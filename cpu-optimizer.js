@@ -1,5 +1,5 @@
 /**
- * HFT CPU Optimizer - Capacity Planning Engine v5.1
+ * HFT CPU Optimizer - Capacity Planning Engine v5.2
  * 
  * Logic:
  * 1. Analyze Topology & Split-Brain detection (Interface Groups).
@@ -21,7 +21,7 @@ const CPU_OPTIMIZER = {
     },
 
     optimize(snapshot) {
-        console.log('[Optimizer] Starting optimization v5.1', { totalCores: snapshot.topology.length });
+        console.log('[Optimizer] Starting optimization v5.2', { totalCores: snapshot.topology.length });
 
         // 1. Analyze Topology & Detect Islands
         const topology = this.analyzeTopology(snapshot);
@@ -105,7 +105,7 @@ const CPU_OPTIMIZER = {
         return {
             totalCores: snapshot.topology.length,
             osCores: allOsCores,
-            irqCores: optimizedTopology.irqCoresCount,
+            irqCores: optimizedTopology.irqCores, // List of IDs
             instances: optimizedTopology.instances,
             recommendations: []
         };
@@ -131,19 +131,9 @@ const CPU_OPTIMIZER = {
         const netGroups = {};
 
         // Detect Distinct Network Endpoints (e.g. net vs hit)
-        // Group prefixes: net0, net1 -> 'net'. hit0 -> 'hit'. enp129... -> 'enp129...'
         networkNumas.forEach(numaId => {
             const ifaces = topology.numaInterfaces[numaId];
-            // Heuristic: Use the first alpha-part of interface names to group
-            // Or if user provided explicit names, use those.
-            // Simplified: Treat every NUMA with interfaces as a potential seed.
-            // Merge seeds if they share same interface prefix (e.g. net0 on node0, net1 on node1 -> rare but possible).
-            // Current assumption based on user request: "net0/net1 don't count [as separate], but net/hit do".
-            // So we strip digits and group.
             const prefixes = [...new Set(ifaces.map(i => i.replace(/\d+.*$/, '')))];
-            // Regex: strip trailing digits and sub-interfaces (s0f0 etc if highly specific, but usually prefix is enough)
-            // Example: 'enp129s0f1' -> 'enp129s0f'. 'net0' -> 'net'.
-            // Let's use simple alphanumeric prefix match.
             const groupKey = prefixes.sort().join('+');
 
             if (!netGroups[groupKey]) netGroups[groupKey] = { numas: [], interfaces: [] };
@@ -273,13 +263,9 @@ const CPU_OPTIMIZER = {
             let loadSumGw = 0;
             let loadSumRob = 0;
 
-            // To avoid double counting load if multiple instances map to same core services:
-            // We should look at unique cores used by the Group for Gateway/Robot
-            // Logic: Scan topology, if core has ANY service belonging to ANY instance in group, count it once.
-
             const groupInstSet = new Set(grpInstances);
             const coresUsed = { gateway: new Set(), robot: new Set() };
-            const loadAccum = { gateway: 0, robot: 0 }; // accumulate load from unique cores
+            const loadAccum = { gateway: 0, robot: 0 };
 
             snapshot.topology.forEach(c => {
                 let coreHasGw = false;
@@ -323,7 +309,10 @@ const CPU_OPTIMIZER = {
 
         // 2. Gateway Cores
         let gwNeeded = 1;
-        if (grp.gateways > 0) {
+        // FIX: If load is missing/low (< 1%), assume current capacity is desired/safe default
+        if (gwAvg < 1 && grp.gateways > 0) {
+            gwNeeded = grp.gateways;
+        } else if (grp.gateways > 0) {
             const rawNeeded = (grp.gateways * gwAvg) / 25;
             gwNeeded = Math.ceil(rawNeeded * this.CONSTANTS.GATEWAY_BUFFER);
         }
@@ -331,7 +320,10 @@ const CPU_OPTIMIZER = {
 
         // 3. Robot Cores
         let robNeeded = 1;
-        if (grp.robots > 0) {
+        // FIX: Same logic for robots. If no load data, don't collapse to 1.
+        if (robAvg < 1 && grp.robots > 0) {
+            robNeeded = grp.robots;
+        } else if (grp.robots > 0) {
             robNeeded = Math.ceil((grp.robots * robAvg) / 40);
         }
         robNeeded = Math.max(1, robNeeded);
@@ -391,13 +383,18 @@ const CPU_OPTIMIZER = {
 
         } else {
             // Distribute z
+            // Calculate total weight based on calculated "Needs" (which might be based on current capacity if load is low)
             const totalNeeds = groups.reduce((sum, g) => sum + g.needs.total, 0);
 
             groups.forEach((grp, idx) => {
                 const res = results[idx];
                 const weight = grp.needs.total;
+
+                // Proportional Share of the EXTRA space (z)
                 let robotShare = Math.floor(z * (weight / totalNeeds));
-                robotShare = Math.min(robotShare, grp.needs.robot);
+
+                // FIX: Do NOT cap at needs.robot. Allow robots to consume all available space.
+                // The goal is to maximize performance, not just meet minimum needs.
                 res.assigned.robot = robotShare;
             });
         }
@@ -409,27 +406,20 @@ const CPU_OPTIMIZER = {
         let available = sharedCores.length;
         if (available <= 0) return;
 
-        const unmet = [];
+        // If we have spillover space, just give it to whoever has robots (which is everyone usually)
+        // Weighted by their size
+        const totalAssignedRobots = allocations.reduce((sum, a) => sum + a.assigned.robot, 0);
+
+        if (totalAssignedRobots === 0) return;
+
         allocations.forEach(alloc => {
-            const need = allGroupNeeds.find(n => n.groupId === alloc.groupId);
-            const missing = need.needs.robot - alloc.assigned.robot;
-            if (missing > 0) {
-                unmet.push({ alloc, missing });
-            }
-        });
-
-        if (unmet.length === 0) return;
-
-        const totalMissing = unmet.reduce((s, u) => s + u.missing, 0);
-
-        unmet.forEach(u => {
-            const share = Math.min(u.missing, Math.floor(available * (u.missing / totalMissing)));
-            u.alloc.assigned.robot += share;
+            const share = Math.floor(available * (alloc.assigned.robot / totalAssignedRobots));
+            alloc.assigned.robot += share;
         });
     },
 
     placeServices(allocations, snapshot, osCores, totalIrqNeeded, islandMap) {
-        const result = { irqCoresCount: 0, instances: [] };
+        const result = { irqCores: [], instances: [] };
 
         const coreMap = {};
         const freeCores = new Set();
@@ -457,7 +447,7 @@ const CPU_OPTIMIZER = {
         };
 
         // 1. Place IRQs
-        let irqPlaced = 0;
+        const irqCoresList = [];
         islandMap.forEach((island) => {
             if (island.type !== 'network') return;
             const netIslands = Array.from(islandMap.values()).filter(i => i.type === 'network');
@@ -467,27 +457,18 @@ const CPU_OPTIMIZER = {
                 const c = pickCore({ numas: island.numaNodes });
                 if (c !== null) {
                     freeCores.delete(c);
-                    irqPlaced++;
+                    irqCoresList.push(c);
                 }
             }
         });
-        result.irqCoresCount = irqPlaced;
+        result.irqCores = irqCoresList;
 
         // 2. Place Groups
-        // We place "Groups" now. Each group contains multiple instances.
-        // We will assign the SAME cores to ALL instances in the group for shared services.
-        // And for robots/gateways, we assign to the group (assuming they share pool).
-
         allocations.forEach(alloc => {
-            // For output formatting, we create one result entry per INSTANCE in the group.
-            // All instances in the group get the same assignments.
-
-            // But we only "pick" cores once per group.
             const groupAssignments = [];
             let groupAllocatedCount = 0;
 
             let targetIsland = null;
-            // Use first instance to find island
             const repInst = alloc.instances[0];
             const assignedIf = snapshot.instanceToInterface[repInst];
             for (const island of islandMap.values()) {
@@ -546,7 +527,7 @@ const CPU_OPTIMIZER = {
                 result.instances.push({
                     instanceId: instId,
                     allocatedCores: groupAllocatedCount,
-                    coreAssignments: groupAssignments, // Shared reference is fine/desired
+                    coreAssignments: groupAssignments,
                     gateway: alloc.assigned.gateway,
                     robot: alloc.assigned.robot
                 });
