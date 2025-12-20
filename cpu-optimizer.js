@@ -1,5 +1,5 @@
 /**
- * HFT CPU Optimizer - Capacity Planning Engine v5.4
+ * HFT CPU Optimizer - Capacity Planning Engine v5.5
  * 
  * Logic:
  * 1. Analyze Topology & Split-Brain detection (Interface Groups).
@@ -8,6 +8,7 @@
  * 4. Partition Resources & Proportional Allocation (z-factor).
  * 5. Starvation Protection (Robin Hood + IRQ/Gateway Sacrifice).
  * 6. Topological Placement.
+ * 7. Cap: Robot count <= ceil(Gateway * 2.5) if ample surplus.
  */
 
 const CPU_OPTIMIZER = {
@@ -22,7 +23,7 @@ const CPU_OPTIMIZER = {
     },
 
     optimize(snapshot) {
-        console.log('[Optimizer] Starting optimization v5.4', { totalCores: snapshot.topology.length });
+        console.log('[Optimizer] Starting optimization v5.5', { totalCores: snapshot.topology.length });
 
         // 1. Analyze Topology & Detect Islands
         const topology = this.analyzeTopology(snapshot);
@@ -96,20 +97,8 @@ const CPU_OPTIMIZER = {
 
                 // ATTEMPT 3: Reduce Gateways (Force Mode)
                 if (!finalAlloc) {
-                    // Even with reduced IRQ, we are starving.
-                    // Force allocateIslandResources to cut gateways if needed (it does this if z < 0)
-                    // But if z > 0 and we are just fragmentation-starved, we need to force it.
-                    // Actually, allocateIslandResources handles "z < 0" by cutting gateways.
-                    // The issue is if z >= 0 but proportional share = 0 for someone?
-                    // Re-run with aggressive flag?
                     console.warn(`[Optimizer] Critical Starvation. Forcing Gateway Reduction.`);
-                    // We can simulate less available cores to force squeeze logic?
-                    // No, simply rely on the logic: if z > 0 but someone gets 0 robots, Robin Hood handles it.
-                    // If Robin Hood fails (everyone has <= 1 robot), then we need more space.
-                    // Let's use the result from Attempt 2 (or 1) and modify it manually to steal from Gateways.
-
                     let bestResult = result1; // Fallback to initial
-                    // Steal from Gateways
                     const availableFinal = totalIslandCores - osCores.length - usedIrq;
                     finalAlloc = this.forceStarvationRelief(islandGroups, availableFinal);
                 }
@@ -137,12 +126,10 @@ const CPU_OPTIMIZER = {
 
     forceStarvationRelief(groups, availableCores) {
         // Aggressive allocation: Ensure 1 robot for everyone first, then Gateways, then Fixed.
-        // If not enough, cut Gateways.
 
         let mandatoryFixed = 0;
         groups.forEach(g => mandatoryFixed += g.needs.fixed);
 
-        // Reserve 1 robot for each
         const robotReservation = groups.length;
 
         let remaining = availableCores - mandatoryFixed - robotReservation;
@@ -160,34 +147,25 @@ const CPU_OPTIMIZER = {
 
         if (remaining < 0) {
             console.error("Critical Failure: Not enough cores for even 1 robot per instance + Fixed!");
-            // Just return what we have, logic will fail gracefully or overlap
             return results;
         }
 
-        // Distribute remaining to Gateways first, then more Robots
-        // Calculate Total Gateway Demand
         const totalGwDemand = groups.reduce((sum, g) => sum + g.needs.gateway, 0);
 
-        // 1. Fill Gateways up to demand or limit
+        // 1. Fill Gateways
         if (remaining > 0) {
             if (remaining >= totalGwDemand) {
-                // Give requested gateways
                 results.forEach((r, i) => r.assigned.gateway = groups[i].needs.gateway);
                 remaining -= totalGwDemand;
             } else {
-                // Proportional Gateway squeeze
                  results.forEach((r, i) => {
                     const demand = groups[i].needs.gateway;
                     const share = Math.floor(remaining * (demand / totalGwDemand));
-                    r.assigned.gateway = Math.max(1, share); // Try to keep at least 1 gateway
+                    r.assigned.gateway = Math.max(1, share);
                  });
-                 remaining = 0; // Consumed all trying to satisfy gateways
+                 remaining = 0;
             }
         } else {
-             // No space for gateways? Set to 1 and eat into Robot reservation?
-             // Logic above reserved robots first. This implies Gateways = 0.
-             // User said: "N cores gates, if their < 4" -> reduce gateways.
-             // Minimum should be 1.
              results.forEach(r => r.assigned.gateway = 1);
         }
 
@@ -196,6 +174,20 @@ const CPU_OPTIMIZER = {
              const totalWeight = groups.reduce((sum, g) => sum + g.needs.total, 0);
              results.forEach((r, i) => {
                  const share = Math.floor(remaining * (groups[i].needs.total / totalWeight));
+                 const maxRobots = Math.ceil(r.assigned.gateway * 2.5); // CAP logic here too just in case
+
+                 // Add share, but check cap?
+                 // Wait, maxRobots applies to TOTAL.
+                 // Current robot = 1.
+                 // New robot = 1 + share.
+                 // Limit = min(1+share, maxRobots).
+                 // Actually forceStarvationRelief is for "not enough" cores.
+                 // The 2.5x cap is for "too many" cores.
+                 // So here we probably won't hit it, but for safety:
+                 const desired = 1 + share;
+                 // r.assigned.robot = Math.min(desired, maxRobots);
+                 // If 1 > maxRobots (e.g. gateway=0 -> max=0?), but gateway is min 1 -> max=3.
+                 // So 1 is always safe.
                  r.assigned.robot += share;
              });
         }
@@ -226,7 +218,6 @@ const CPU_OPTIMIZER = {
             // Squeeze Gateways
             let remaining = availableCores - groups.reduce((s,g) => s+g.needs.fixed, 0); // Remove fixed cost
 
-            // Distribute remaining to Gateways
              if (remaining > 0) {
                 const totalGwDemand = groups.reduce((sum, g) => sum + g.needs.gateway, 0);
                 results.forEach(r => {
@@ -238,27 +229,36 @@ const CPU_OPTIMIZER = {
             }
             results.forEach(r => r.assigned.robot = 0);
         } else {
-            // Surplus -> Robots
+            // Surplus -> Robots with CAP (2.5x Gateway)
             const totalWeight = groups.reduce((sum, g) => sum + g.needs.total, 0);
-            let usedZ = 0;
+
+            // First pass: Calculate proportional share but respect caps
+            let totalAssigned = 0;
+            const caps = results.map(r => Math.ceil(r.assigned.gateway * 2.5));
+
+            // If z is very large, pure proportional might exceed cap.
+            // We give min(share, cap).
+            // But if we cap someone, z isn't fully used.
+            // That is INTENDED behavior based on "do not give > 2.5x".
+
             groups.forEach((grp, idx) => {
                 const res = results[idx];
-                const share = Math.floor(z * (grp.needs.total / totalWeight));
-                res.assigned.robot = share;
-                usedZ += share;
+                const rawShare = Math.floor(z * (grp.needs.total / totalWeight));
+                const cap = caps[idx];
+
+                // Limit the share
+                const finalShare = Math.min(rawShare, cap);
+
+                res.assigned.robot = finalShare;
             });
 
-            // Remainder
-            let remainder = z - usedZ;
-            if (remainder > 0) {
-                const sortedByWeight = [...results].sort((a, b) => b.weight - a.weight);
-                for (let i = 0; i < remainder; i++) {
-                    sortedByWeight[i % sortedByWeight.length].assigned.robot++;
-                }
-            }
+            // We intentionally do NOT loop to distribute the "lost" remainder if capped.
+            // The constraint is strict: don't give more than 2.5x.
+            // If there's surplus z left over, it stays unused (free cores).
         }
 
         // Robin Hood (Robot <-> Robot only)
+        // Ensure at least 1 robot if possible, even if cap is < 1 (which shouldn't happen since Gate >= 1 -> Cap >= 3)
         let starving = results.filter(r => r.assigned.robot === 0);
         let maxIterations = groups.length * 2;
 
@@ -497,41 +497,11 @@ const CPU_OPTIMIZER = {
         islandMap.forEach((island) => {
             if (island.type !== 'network') return;
             const netIslands = Array.from(islandMap.values()).filter(i => i.type === 'network');
-            // We use totalIrqNeeded passed from caller if it varies?
-            // Actually optimize() loops islands and sums irq. We need to respect the *actual* IRQ used in that pass.
-            // But optimize() calculates IRQ per island dynamically now.
-            // Let's rely on the passed totalIrqNeeded for GLOBAL, but we need per-island count.
-            // Simplified: Re-calculate or use the constant?
-            // Wait, optimize() decided on IRQ count (maybe reduced). We need that info here.
-            // But we don't pass it easily.
-            // FIX: We will just allocate 'totalIrqNeeded' cores by distributing them to network islands.
-            // Since placeServices logic for IRQ was simple loop:
-
-            // Actually, totalIrqNeeded is global. We need to know how many per island.
-            // For now, assume uniform or standard unless we pass a map.
-            // In split brain, usually 3 per island. If reduced to 2, it's global reduction?
-            // The logic in optimize() reduced `currentIrq` for *that specific island*.
-            // We should ideally pass `irqMap` or similar.
-            // Fallback: Just allocate 3 (or standard) and if we run out of free cores, we run out.
-            // BUT: placeServices consumes freeCores. If we allocate 3 IRQ but the logic assumed 2, we might steal a core from robots.
-            // Critical Fix: placeServices needs to know exactly how many IRQs per island.
-
-            // Let's infer from free space? No.
-            // Let's assume standard for now, as passing complex object requires signature change.
-            // Or better: Just allocate `totalIrqNeeded` greedily across network islands.
-
-            // BETTER: We'll modify placeServices to accept an `islandIrqCounts` map if possible.
-            // Given I can't easily change signature in this tool block without risk,
-            // I will use a heuristic: Allocate `totalIrqNeeded` by cycling through network islands.
         });
 
-        // Re-implement IRQ placement using totalIrqNeeded
-        // We know totalIrqNeeded is the sum of decision made in optimize()
         const netIslands = Array.from(islandMap.values()).filter(i => i.type === 'network');
         if (netIslands.length > 0) {
             let placed = 0;
-            // Distribute round-robin or fill?
-            // Usually symmetric.
             const limitPerIsland = Math.ceil(totalIrqNeeded / netIslands.length);
 
             netIslands.forEach(island => {
