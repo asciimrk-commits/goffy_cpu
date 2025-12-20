@@ -63,6 +63,7 @@ const HFT = {
 
     selectInstance(name) {
         this.state.selectedInstance = name;
+        this.renderBlueprint(); // Re-render to update highlighting
     },
 
     addInstance() {
@@ -590,7 +591,7 @@ const HFT = {
         const fillTags = tags.filter(t => t !== 'isolated');
         const isIsolated = tags.includes('isolated') || this.state.isolatedCores.has(cpu);
 
-        el.classList.remove('has-role', 'isolated');
+        el.classList.remove('has-role', 'isolated', 'instance-active', 'instance-dimmed');
         el.style.background = '';
         el.style.borderColor = '';
         el.querySelector('.core-label').textContent = '';
@@ -606,18 +607,37 @@ const HFT = {
             el.querySelector('.core-label').textContent = activeInst;
         }
 
+        // Instance Highlighting Logic
+        if (this.state.selectedInstance !== 'Physical') {
+            const belongsToSelected = this.state.instances[this.state.selectedInstance]?.[cpu]?.size > 0;
+            if (belongsToSelected) {
+                el.classList.add('instance-active');
+            } else {
+                el.classList.add('instance-dimmed');
+            }
+        }
+
         if (fillTags.length > 0) el.classList.add('has-role');
         if (isIsolated) el.classList.add('isolated');
 
         if (fillTags.length === 1) {
             const role = HFT_RULES.roles[fillTags[0]];
-            if (role) { el.style.background = role.color; el.style.borderColor = role.color; }
+            if (role) {
+                el.style.background = role.color;
+                // Only override border color if NOT active highlighting (which uses primary color)
+                if (!el.classList.contains('instance-active')) {
+                    el.style.borderColor = role.color;
+                }
+            }
         } else if (fillTags.length > 1) {
             const colors = fillTags.map(t => HFT_RULES.roles[t]?.color || '#555');
             const step = 100 / colors.length;
             const stops = colors.map((col, idx) => `${col} ${idx * step}%, ${col} ${(idx + 1) * step}%`).join(', ');
             el.style.background = `linear-gradient(135deg, ${stops})`;
-            el.style.borderColor = 'rgba(255,255,255,0.3)';
+            // Only override border color if NOT active highlighting
+            if (!el.classList.contains('instance-active')) {
+                el.style.borderColor = 'rgba(255,255,255,0.3)';
+            }
         }
     },
 
