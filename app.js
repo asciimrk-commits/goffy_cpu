@@ -38,6 +38,13 @@ const HFT = {
         if (!this.loadFromUrlHash()) {
             this.restoreFromLocalStorage();
         }
+
+        // Add resize listener for auto-scaling
+        window.addEventListener('resize', () => {
+            if (document.getElementById('tab-mapper')?.classList.contains('active')) {
+                this.scaleToFit();
+            }
+        });
     },
 
     initInstanceManager() {
@@ -119,6 +126,11 @@ const HFT = {
                 tab.classList.add('active');
                 document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                 document.getElementById(`tab-${tabId}`)?.classList.add('active');
+
+                // Trigger scaling if mapper tab is activated
+                if (tabId === 'mapper') {
+                    requestAnimationFrame(() => this.scaleToFit());
+                }
             });
         });
     },

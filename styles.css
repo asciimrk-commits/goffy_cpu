@@ -86,6 +86,13 @@ html, body {
     margin-left: calc(var(--sidebar-width) * -1);
 }
 
+.sidebar-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
 .sidebar-header {
     height: var(--header-height);
     min-height: var(--header-height);
@@ -154,6 +161,8 @@ html, body {
     border: var(--border-width) solid var(--neutral-200);
     padding: var(--space-3);
     border-radius: 0; /* Sharp */
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .panel-title {
@@ -168,6 +177,9 @@ html, body {
     margin-bottom: var(--space-3);
     border-bottom: 1px solid var(--neutral-200);
     padding-bottom: var(--space-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .panel-icon {
@@ -812,3 +824,16 @@ input:focus, select:focus {
 .text-accent { color: var(--primary); }
 .tab-content { display: none; height: 100%; }
 .tab-content.active { display: block; overflow-y: auto; }
+
+/* Specific override for Mapper tab to ensure viewport fit */
+#tab-mapper.active {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#tab-mapper .canvas-wrapper {
+    flex: 1;
+    overflow: hidden;
+    height: 100%;
+}
