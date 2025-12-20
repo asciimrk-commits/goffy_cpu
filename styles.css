@@ -506,8 +506,10 @@ select:focus {
     background: var(--neutral-100);
     border: 1px solid var(--neutral-200);
     padding: var(--space-2);
-    flex: 1 1 300px; /* Allow growing, shrinking, basis 300px */
-    min-width: 300px;
+    flex: 1 1 0; /* Equal width columns */
+    min-width: 250px;
+    display: flex;
+    flex-direction: column;
 }
 
 .socket-label {
@@ -518,12 +520,14 @@ select:focus {
     text-transform: uppercase;
     border-bottom: 1px solid var(--neutral-200);
     padding-bottom: var(--space-1);
+    flex-shrink: 0;
 }
 
 .socket-content {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    display: flex;
+    flex-direction: column;
     gap: var(--space-2);
+    flex: 1;
 }
 
 /* NUMA */
@@ -531,10 +535,12 @@ select:focus {
     background: var(--neutral-50);
     border: 1px solid var(--neutral-200);
     padding: var(--space-2);
-    min-width: 0; /* Important for grid item to shrink */
+    min-width: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: var(--space-2);
+    /* Dense grid for L3 caches to wrap horizontally */
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: var(--space-1);
+    align-content: start;
 }
 
 .numa.is-network {
@@ -548,7 +554,7 @@ select:focus {
     margin-bottom: var(--space-2);
     display: flex;
     justify-content: space-between;
-    grid-column: 1 / -1; /* Span across both columns */
+    grid-column: 1 / -1;
 }
 
 .network-badge {
@@ -561,13 +567,17 @@ select:focus {
 
 /* L3 */
 .l3 {
-    margin-bottom: var(--space-2);
+    margin-bottom: 0;
+    background: var(--neutral-100);
+    border: 1px solid var(--neutral-200);
+    padding: 4px;
 }
 
 .l3-label {
-    font-size: 9px;
+    font-size: 8px;
     color: var(--neutral-400);
-    margin-bottom: var(--space-1);
+    margin-bottom: 2px;
+    text-align: center;
 }
 
 /* Cores Grid */
@@ -739,15 +749,21 @@ select:focus {
 /* Compare Mode Styling - Matches Main Map */
 .cmp-blueprint {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
     gap: var(--space-2);
     overflow-y: auto;
+    align-content: flex-start;
 }
 
 .cmp-socket {
     background: var(--neutral-100);
     border: 1px solid var(--neutral-200);
     padding: var(--space-2);
+    flex: 1 1 0;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
 }
 
 .cmp-socket-hdr {
@@ -758,18 +774,24 @@ select:focus {
     text-transform: uppercase;
     border-bottom: 1px solid var(--neutral-200);
     padding-bottom: 2px;
+    flex-shrink: 0;
 }
 
 .cmp-socket-body {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    display: flex;
+    flex-direction: column;
     gap: var(--space-2);
+    flex: 1;
 }
 
 .cmp-numa {
     background: var(--neutral-50);
     border: 1px solid var(--neutral-200);
     padding: var(--space-2);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 1px;
+    align-content: start;
 }
 
 .cmp-numa.is-net {
@@ -785,16 +807,21 @@ select:focus {
     color: var(--neutral-500);
     margin-bottom: var(--space-2);
     text-transform: uppercase;
+    grid-column: 1 / -1;
 }
 
 .cmp-l3 {
-    margin-bottom: var(--space-2);
+    margin-bottom: 0;
+    background: var(--neutral-100);
+    border: 1px solid var(--neutral-200);
+    padding: 2px;
 }
 
 .cmp-l3-label {
     font-size: 8px;
     color: var(--neutral-400);
-    margin-bottom: 2px;
+    margin-bottom: 1px;
+    text-align: center;
 }
 
 .cmp-cores {
@@ -953,6 +980,8 @@ select:focus {
     background: transparent;
     border: none;
     padding: 0;
+    display: flex;
+    flex-direction: column;
     gap: var(--space-4);
 }
 
@@ -996,7 +1025,7 @@ select:focus {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: var(--space-3);
-    margin-top: var(--space-2);
+    margin-top: 0;
 }
 
 .opt-instance {
@@ -1014,7 +1043,7 @@ select:focus {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: var(--neutral-50);
+    background: var(--neutral-200);
 }
 
 .opt-inst-header h3 {
