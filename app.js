@@ -642,13 +642,19 @@ const HFT = {
         const tags = this.state.instances[instanceName][cpu];
 
         if (isEraser) {
-            // Global Clean: Remove this core from ALL instances and clear isolation
+            // Global Clean: Remove this core from ALL instances
             Object.keys(this.state.instances).forEach(inst => {
                 if (this.state.instances[inst][cpu]) {
                     this.state.instances[inst][cpu].clear();
                 }
             });
-            this.state.isolatedCores.delete(cpu);
+            // Only remove isolation if the active tool IS 'isolated'
+            if (this.activeTool.id === 'isolated') {
+                this.state.isolatedCores.delete(cpu);
+            } else {
+                // Otherwise ensure it IS isolated (default state for empty cores)
+                this.state.isolatedCores.add(cpu);
+            }
         }
         else if (this.activeTool.id === 'isolated') {
             if (this.state.isolatedCores.has(cpu)) this.state.isolatedCores.delete(cpu);
@@ -767,15 +773,41 @@ const HFT = {
         });
         const netCores = (physicalRoles['net_irq'] || []).sort((a, b) => a - b);
         if (netCores.length > 0) {
-            txt += 'net_cpus:\n';
-            // Use collected network interfaces or fallback to net0
-            const netInterfaces = this.state.networkInterfaces || [];
-            if (netInterfaces.length > 0) {
-                netInterfaces.forEach(iface => {
-                    // Check if we have specific mapping for this interface
-                    txt += `  ${iface.name || iface}: [${netCores.join(', ')}]\n`;
+            // Group IRQ cores by NUMA
+            const irqByNuma = {};
+            netCores.forEach(c => {
+                const numa = this.state.coreNumaMap[c.toString()] || '0';
+                if (!irqByNuma[numa]) irqByNuma[numa] = [];
+                irqByNuma[numa].push(c);
+            });
+
+            // Filter interesting interfaces (net*, hit*, eth*) and map IRQ cores
+            const interestingInterfaces = (this.state.networkInterfaces || [])
+                .filter(iface => {
+                    const name = iface.name || iface;
+                    return /^(net|hit|eth)/.test(name) && !/^enp/.test(name);
                 });
-            } else {
+
+            if (interestingInterfaces.length > 0) {
+                txt += 'net_cpus:\n';
+                interestingInterfaces.forEach(iface => {
+                    const name = iface.name || iface;
+                    const numa = (iface.numaNode !== undefined ? iface.numaNode : 0).toString();
+                    const cores = irqByNuma[numa] || [];
+                    if (cores.length > 0) {
+                        txt += `  ${name}: [${cores.join(', ')}]\n`;
+                    } else {
+                        // Fallback: if no IRQ cores on this NUMA, maybe use all IRQ cores?
+                        // Or leave empty? User requirement says map specific cores to specific nodes.
+                        // If empty, it might be better to skip or output empty list.
+                        // Given user example: "net0: [6,7,8]" (Node 0), "hit0: [64...]" (Node 1)
+                        // If we have no IRQ cores on that node, outputting [] is probably correct or safe default.
+                        txt += `  ${name}: []\n`;
+                    }
+                });
+            } else if (netCores.length > 0) {
+                // Fallback if no interesting interfaces found but we have IRQ cores
+                txt += 'net_cpus:\n';
                 txt += `  net0: [${netCores.join(', ')}]\n`;
             }
         }
