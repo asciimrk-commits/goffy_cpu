@@ -537,8 +537,8 @@ select:focus {
     padding: var(--space-2);
     min-width: 0;
     display: grid;
-    /* Dense grid for L3 caches to wrap horizontally */
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    /* Strict 2-column grid for L3 caches as requested */
+    grid-template-columns: 1fr 1fr;
     gap: var(--space-1);
     align-content: start;
 }
@@ -583,7 +583,8 @@ select:focus {
 /* Cores Grid */
 .cores-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
+    /* Auto-fit to ensure cores expand to fill the available space */
+    grid-template-columns: repeat(auto-fit, minmax(28px, 1fr));
     gap: 1px;
 }
 
@@ -789,7 +790,8 @@ select:focus {
     border: 1px solid var(--neutral-200);
     padding: var(--space-2);
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    /* Consistent 2-column layout */
+    grid-template-columns: 1fr 1fr;
     gap: 1px;
     align-content: start;
 }
@@ -826,7 +828,8 @@ select:focus {
 
 .cmp-cores {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(20px, 1fr));
+    /* Auto-fit for consistent behavior */
+    grid-template-columns: repeat(auto-fit, minmax(20px, 1fr));
     gap: 1px;
 }
 
