@@ -48,7 +48,10 @@ const CPU_OPTIMIZER = {
 
             // OS Calculation
             let osCores = [];
-            const osCount = Math.max(this.CONSTANTS.MIN_OS_CORES, Math.ceil(totalIslandCores * this.CONSTANTS.OS_RATIO));
+            // Use floor to be less aggressive with OS cores on smaller islands, or adjust logic.
+            // 32 cores * 0.1 = 3.2. User wants 3. floor(3.2) = 3.
+            // If totalIslandCores is small (e.g. 16), 1.6 -> 1? MIN_OS_CORES is 2. So 2.
+            const osCount = Math.max(this.CONSTANTS.MIN_OS_CORES, Math.floor(totalIslandCores * this.CONSTANTS.OS_RATIO));
 
             if (island.osStrategy === 'start') {
                 osCores = islandCores.slice(0, osCount).map(c => c.id);
