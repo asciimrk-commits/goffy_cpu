@@ -522,7 +522,7 @@ select:focus {
 
 .socket-content {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: var(--space-2);
 }
 
@@ -533,7 +533,7 @@ select:focus {
     padding: var(--space-2);
     min-width: 0; /* Important for grid item to shrink */
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: var(--space-2);
 }
 
