@@ -2045,20 +2045,33 @@ const HFT = {
         this.state.isolatedCores.clear(); // Clear isolation
 
         // Apply new config
-        // First, mark all OS cores (implicitly 0-N)
-        // Actually, we should set isolated=true for all NON-OS cores first?
-        // Or just set isolated=true based on assignments.
-        // Logic: cores 0-N are OS, everything else is Isolated.
-        // Wait, optimizer returns strict OS set.
+
+        // 1. Apply OS Cores
         const osSet = new Set(this.proposedConfig.osCores.map(c => String(c)));
         const allCores = Object.keys(this.state.coreNumaMap);
 
         allCores.forEach(cpu => {
-            if (!osSet.has(String(cpu))) {
-                this.state.isolatedCores.add(String(cpu));
+            const cpuStr = String(cpu);
+            if (!osSet.has(cpuStr)) {
+                this.state.isolatedCores.add(cpuStr);
+            } else {
+                // Mark OS cores clearly
+                this.addTag('Physical', cpuStr, 'sys_os');
             }
         });
 
+        // 2. Apply IRQ Cores
+        if (this.proposedConfig.irqCores && Array.isArray(this.proposedConfig.irqCores)) {
+            this.proposedConfig.irqCores.forEach(c => {
+                this.addTag('Physical', String(c), 'net_irq');
+                // Ensure IRQ cores are also isolated from general pool if needed,
+                // but usually they are part of isolated set in HFT context.
+                // Our logic above isolates everything NOT in osCores.
+                // So IRQ cores are already isolated. Correct.
+            });
+        }
+
+        // 3. Apply Instance Roles
         this.proposedConfig.instances.forEach(instPlan => {
             const instName = instPlan.instanceId;
             // if (instName === 'SYSTEM') return; // SYSTEM tasks handled separately?
