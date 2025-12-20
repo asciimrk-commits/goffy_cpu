@@ -2058,7 +2058,8 @@ const HFT = {
             <div class="opt-stat-item"><span>IRQ Cores</span><strong>${result.irqCores}</strong></div>
         </div>`;
 
-        // Instances breakdown
+        // Instances breakdown - Wrapped in Grid
+        html += '<div class="opt-grid">';
         result.instances.forEach(inst => {
             const isAllocated = inst.allocatedCores > 0;
             const score = inst.totalScore || 0;
@@ -2117,6 +2118,7 @@ const HFT = {
 
             html += `</div>`;
         });
+        html += '</div>'; // End opt-grid
 
         // Global Recommendations
         if (result.recommendations && result.recommendations.length > 0) {
