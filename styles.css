@@ -145,6 +145,7 @@ html, body {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
+    min-height: 0; /* Crucial for nested flex scroll */
 }
 
 /* Panels */
@@ -436,14 +437,19 @@ input:focus, select:focus {
 .canvas-wrapper {
     flex: 1;
     padding: var(--space-4);
-    overflow-y: auto;
+    overflow: hidden; /* Prevent scrolling, force fit */
     background: var(--neutral-50);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .blueprint {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
+    transform-origin: center top;
+    transition: transform 0.2s ease-out;
 }
 
 /* Socket */
@@ -801,3 +807,8 @@ input:focus, select:focus {
     padding: 4px;
     margin-top: 4px;
 }
+
+/* Utility Helpers */
+.text-accent { color: var(--primary); }
+.tab-content { display: none; height: 100%; }
+.tab-content.active { display: block; overflow-y: auto; }
