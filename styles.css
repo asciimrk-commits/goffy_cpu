@@ -128,10 +128,10 @@ html, body {
     background: var(--bg-surface);
     display: flex;
     flex-direction: column;
+    height: 100vh; /* Ensure full height constraint */
     z-index: 20;
     transition: margin-left 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
-    /* Neumorphic separator: just a subtle groove or nothing if unified */
-    box-shadow: 2px 0 8px rgba(0,0,0,0.05); /* Very subtle separation */
+    box-shadow: 2px 0 8px rgba(0,0,0,0.05);
 }
 
 .sidebar.collapsed {
@@ -140,10 +140,11 @@ html, body {
 
 .sidebar-header {
     height: var(--header-height);
+    min-height: var(--header-height); /* Prevent shrinking */
     display: flex;
     align-items: center;
     padding: 0 var(--space-4);
-    /* No hard border */
+    flex-shrink: 0;
 }
 
 .logo {
@@ -195,7 +196,7 @@ html, body {
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    min-height: 0; /* Ensure flexbox scroll works */
+    min-height: 0; /* Critical for nested flex scrolling */
 }
 
 /* Panels / Cards */
@@ -772,23 +773,189 @@ input:focus, select:focus {
 }
 
 /* Compare Mode & Optimize Mode (Reusing panel styles) */
-.cmp-grid, .optimize-container {
+.cmp-grid {
+    padding: var(--space-6);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-6);
+    height: calc(100vh - 140px); /* Fill remaining height */
+    overflow: hidden; /* Inner scroll */
+}
+
+.optimize-container {
     padding: var(--space-6);
 }
 
 .cmp-stats {
     display: none; /* Hidden by default */
+    justify-content: center;
+    gap: var(--space-6);
+    padding: var(--space-3);
+    background: var(--bg-app); /* Embed in background */
 }
 #tab-compare.active .cmp-stats {
     display: flex;
 }
+
+.cmp-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: var(--bg-surface);
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-flat);
+}
+
+.cmp-stat-val { font-size: 16px; font-weight: 700; font-family: var(--font-mono); }
+.cmp-stat-lbl { font-size: 10px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
+.cmp-added { color: var(--success); }
+.cmp-removed { color: var(--error); }
+.cmp-changed { color: var(--warning); }
 
 .cmp-side, .opt-results {
     background: var(--bg-surface);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-raised);
     padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden; /* Scroll inside body */
 }
+
+.cmp-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    flex-shrink: 0;
+}
+
+.cmp-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    box-shadow: var(--shadow-flat);
+}
+.cmp-old { color: var(--text-muted); }
+.cmp-new { color: var(--primary); }
+
+.cmp-server-input {
+    flex: 1;
+    height: 36px; /* Smaller than standard */
+    font-size: 13px;
+    box-shadow: var(--shadow-inset-dark), var(--shadow-inset-light);
+    border-radius: 8px;
+    padding: 0 12px;
+    border: none;
+    background: var(--bg-app);
+    color: var(--text-primary);
+}
+
+.cmp-actions {
+    display: flex;
+    gap: var(--space-2);
+}
+
+.cmp-input-area {
+    margin-bottom: var(--space-4);
+    flex-shrink: 0;
+}
+
+.cmp-textarea {
+    width: 100%;
+    height: 80px;
+    background: var(--bg-app);
+    border: none;
+    border-radius: var(--radius);
+    padding: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-inset-dark), var(--shadow-inset-light);
+    resize: none;
+}
+
+.cmp-body {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--bg-app);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+    box-shadow: var(--shadow-inset-dark), var(--shadow-inset-light);
+}
+
+/* Compare Blueprint Overrides */
+.cmp-blueprint {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.cmp-socket {
+    background: var(--bg-surface);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+    box-shadow: var(--shadow-flat);
+}
+
+.cmp-socket-hdr {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: var(--space-2);
+    text-transform: uppercase;
+}
+
+.cmp-numa {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.cmp-numa-hdr {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cmp-cores {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.cmp-core {
+    width: 28px;
+    height: 28px;
+    font-size: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-app);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    cursor: default;
+    box-shadow: -1px -1px 2px rgba(255,255,255,0.5), 1px 1px 2px rgba(0,0,0,0.1);
+}
+
+.cmp-core.has-role {
+    color: #fff;
+    box-shadow: inset 1px 1px 2px rgba(0,0,0,0.2);
+}
+
+/* Diff highlights */
+.diff-added { box-shadow: 0 0 0 2px var(--success); z-index: 2; }
+.diff-removed { box-shadow: 0 0 0 2px var(--error); z-index: 2; opacity: 0.6; }
+.diff-changed { box-shadow: 0 0 0 2px var(--warning); z-index: 2; }
 
 .opt-results {
     color: var(--text-primary);
