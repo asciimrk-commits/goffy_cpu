@@ -532,6 +532,9 @@ select:focus {
     border: 1px solid var(--neutral-200);
     padding: var(--space-2);
     min-width: 0; /* Important for grid item to shrink */
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
 }
 
 .numa.is-network {
@@ -545,6 +548,7 @@ select:focus {
     margin-bottom: var(--space-2);
     display: flex;
     justify-content: space-between;
+    grid-column: 1 / -1; /* Span across both columns */
 }
 
 .network-badge {
