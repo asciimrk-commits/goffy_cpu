@@ -1898,11 +1898,55 @@ const HFT = {
             });
         });
 
+        // Infer instanceToInterface if missing
+        // Strategy: Check if instance has 'net_cpu' mapped already.
+        // If not, calculate majority NUMA node of its services and pick interface on that node.
+        const instanceToInterface = { ...s.instanceToInterface };
+        const interfaceNumaMap = s.networkInterfaces.reduce((acc, n) => { acc[n.name] = n.numaNode; return acc; }, {});
+
+        // Identify instances needing inference
+        const knownInstances = new Set();
+        s.topology?.forEach(c => c.services.forEach(svc => knownInstances.add(svc.instanceId)));
+
+        // Also check instances in parsing
+        Object.keys(s.instances).forEach(i => { if(i !== 'Physical') knownInstances.add(i); });
+
+        knownInstances.forEach(instId => {
+            if (instId === 'SYSTEM') return;
+            if (instanceToInterface[instId]) return; // Already known
+
+            // Calculate center of mass (majority NUMA)
+            const numaCounts = {};
+            let maxCount = 0;
+            let bestNuma = -1;
+
+            // Iterate all cores for this instance
+            Object.entries(s.instances[instId] || {}).forEach(([cpu, _]) => {
+                const numa = s.coreNumaMap[cpu];
+                if (numa !== undefined) {
+                    numaCounts[numa] = (numaCounts[numa] || 0) + 1;
+                    if (numaCounts[numa] > maxCount) {
+                        maxCount = numaCounts[numa];
+                        bestNuma = parseInt(numa);
+                    }
+                }
+            });
+
+            if (bestNuma !== -1) {
+                // Find interface on this NUMA
+                // Prioritize interfaces that match 'net' or 'hit' prefix if possible, or just first found
+                const iface = s.networkInterfaces.find(n => n.numaNode === bestNuma);
+                if (iface) {
+                    instanceToInterface[instId] = iface.name;
+                }
+            }
+        });
+
         return {
             topology: topology,
             network: s.networkInterfaces.map(n => ({ name: n.name, numaNode: n.numaNode })),
-            instanceToInterface: s.instanceToInterface || {},
-            interfaceNumaMap: s.networkInterfaces.reduce((acc, n) => { acc[n.name] = n.numaNode; return acc; }, {})
+            instanceToInterface: instanceToInterface,
+            interfaceNumaMap: interfaceNumaMap
         };
     },
 
