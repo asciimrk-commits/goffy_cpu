@@ -510,7 +510,7 @@ const HFT = {
         }
 
         // Grid Container
-        let html = `<div class="blueprint">`;
+        let html = `<div class="blueprint" id="blueprint">`;
 
         const sockets = Object.keys(geometry).sort((a, b) => parseInt(a) - parseInt(b));
         sockets.forEach(socketId => {
@@ -522,6 +522,40 @@ const HFT = {
 
         // Apply colors after render
         Object.keys(this.state.coreNumaMap).forEach(cpu => this.updateCoreVisual('Physical', cpu));
+
+        // Adjust Scaling to fit Viewport
+        requestAnimationFrame(() => this.scaleToFit());
+    },
+
+    scaleToFit() {
+        const wrapper = document.querySelector('.canvas-wrapper');
+        const blueprint = document.getElementById('blueprint');
+
+        if (!wrapper || !blueprint) return;
+
+        // Reset transform to measure natural size
+        blueprint.style.transform = 'none';
+
+        const padding = 32; // var(--space-4) * 2
+        const availWidth = wrapper.clientWidth - padding;
+        const availHeight = wrapper.clientHeight - padding;
+
+        const contentWidth = blueprint.scrollWidth;
+        const contentHeight = blueprint.scrollHeight;
+
+        if (contentWidth === 0 || contentHeight === 0) return;
+
+        const scaleX = availWidth / contentWidth;
+        const scaleY = availHeight / contentHeight;
+
+        // Scale down if needed, but cap scaling up to avoid blurriness/huge elements?
+        // User asked: "must fit in 1 screen", implying shrink if too big.
+        // If content is small, keeping scale=1 is usually safer, but user said "adapt exactly under 1 screen"
+        // Let's cap max scale at 1.0 to avoid upscaling tiny servers excessively, but ensure it shrinks.
+        const scale = Math.min(scaleX, scaleY, 1);
+
+        // Apply scale
+        blueprint.style.transform = `scale(${scale})`;
     },
 
     renderSocket(socketId, numaData) {
