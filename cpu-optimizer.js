@@ -1,12 +1,13 @@
 /**
- * HFT CPU Optimizer - Capacity Planning Engine v5.2
+ * HFT CPU Optimizer - Capacity Planning Engine v5.3
  * 
  * Logic:
  * 1. Analyze Topology & Split-Brain detection (Interface Groups).
- * 2. Calculate Resource Needs per Instance (Grouped by Co-location).
- * 3. Partition Resources (Islands).
- * 4. Allocate Cores (Fixed -> Gateway -> Robot z-factor).
- * 5. Topological Placement (L3 constraints).
+ * 2. Strict Instance->NUMA Mapping (Instance "Islands").
+ * 3. Calculate Resource Needs per Instance.
+ * 4. Partition Resources & Proportional Allocation (z-factor).
+ * 5. Starvation Protection (Robin Hood).
+ * 6. Topological Placement.
  */
 
 const CPU_OPTIMIZER = {
@@ -21,22 +22,25 @@ const CPU_OPTIMIZER = {
     },
 
     optimize(snapshot) {
-        console.log('[Optimizer] Starting optimization v5.2', { totalCores: snapshot.topology.length });
+        console.log('[Optimizer] Starting optimization v5.3', { totalCores: snapshot.topology.length });
 
         // 1. Analyze Topology & Detect Islands
         const topology = this.analyzeTopology(snapshot);
         const islandMap = this.detectIslands(snapshot, topology);
 
-        // 2. Calculate Needs (Grouped by Shared Resources)
-        // We group instances that share cores into "Resource Groups" to avoid double counting needs.
+        // 2. Strict Instance Mapping: Assign every instance to a specific Island
+        const instanceToIsland = this.mapInstancesToIslands(snapshot, islandMap, topology);
+
+        // 3. Calculate Needs (Grouped by Shared Resources)
+        // Group instances based on their assigned Island to ensure we optimize them in the correct context
+        // In v5.3, we assume instances don't share cores across Islands (Split Brain)
         const instanceGroups = this.extractInstanceGroups(snapshot);
         const groupNeeds = instanceGroups.map(grp => this.calculateGroupNeeds(grp));
 
-        // 3. Global OS/IRQ Calculation
+        // 4. Global OS/IRQ Calculation (but applied per Island)
         let allOsCores = [];
         let totalIrqCount = 0;
 
-        // 4. Per-Island Optimization
         const allocations = [];
 
         islandMap.forEach((island, islandId) => {
@@ -47,11 +51,8 @@ const CPU_OPTIMIZER = {
             const totalIslandCores = islandCores.length;
 
             // OS Calculation
-            let osCores = [];
-            // Use floor to be less aggressive with OS cores on smaller islands, or adjust logic.
-            // 32 cores * 0.1 = 3.2. User wants 3. floor(3.2) = 3.
-            // If totalIslandCores is small (e.g. 16), 1.6 -> 1? MIN_OS_CORES is 2. So 2.
             const osCount = Math.max(this.CONSTANTS.MIN_OS_CORES, Math.floor(totalIslandCores * this.CONSTANTS.OS_RATIO));
+            let osCores = [];
 
             if (island.osStrategy === 'start') {
                 osCores = islandCores.slice(0, osCount).map(c => c.id);
@@ -63,7 +64,6 @@ const CPU_OPTIMIZER = {
             // IRQ Calculation
             let irqCount = 0;
             if (island.type === 'network') {
-                // Check if we have multiple network islands
                 const netIslands = Array.from(islandMap.values()).filter(i => i.type === 'network');
                 irqCount = netIslands.length > 1 ? this.CONSTANTS.IRQ_CORES_SPLIT : this.CONSTANTS.IRQ_CORES_SINGLE;
             }
@@ -71,44 +71,31 @@ const CPU_OPTIMIZER = {
 
             const availableForWork = totalIslandCores - osCores.length - irqCount;
 
-            // B. Filter Groups for this Island
+            // B. Filter Groups for this Island based on Strict Mapping
             const islandGroups = groupNeeds.filter(grp => {
-                // If any instance in the group maps to this island, the whole group goes here.
-                // We assume a group doesn't span islands (physical constraint).
-                const representative = grp.instances[0];
-                const assignedIf = snapshot.instanceToInterface[representative];
-
-                if (assignedIf) {
-                    return island.interfaces.includes(assignedIf);
-                }
-                // Fallback: If single network island, take it.
-                if (island.type === 'network' && Array.from(islandMap.values()).filter(i => i.type === 'network').length === 1) {
-                    return true;
-                }
-                return false;
+                // All instances in a group must belong to the same island due to physical constraints
+                const repInst = grp.instances[0];
+                return instanceToIsland.get(repInst) === islandId;
             });
 
             if (island.type === 'network') {
-                // C. Allocation Logic (The "z" Factor)
+                // C. Proportional Allocation Logic (The "z" Factor + Robin Hood)
                 const islandAlloc = this.allocateIslandResources(islandGroups, availableForWork, irqCount);
                 allocations.push(...islandAlloc);
             }
         });
 
-        // 5. Shared Pool Spillover
-        const sharedIsland = islandMap.get('shared');
-        if (sharedIsland) {
-             const sharedCores = topology.cores.filter(c => sharedIsland.numaNodes.includes(c.numaNodeId));
-             this.distributeSpillover(allocations, sharedCores, groupNeeds);
-        }
+        // 5. Shared Pool Spillover (Only if relevant, but in split-brain, usually ignored or limited)
+        // In strict split-brain, shared pool might be accessible by anyone, or partitioned.
+        // For now, we assume strict Islands. If "Shared" island exists, logic handles it.
 
         // 6. Topological Placement
-        const optimizedTopology = this.placeServices(allocations, snapshot, allOsCores, totalIrqCount, islandMap);
+        const optimizedTopology = this.placeServices(allocations, snapshot, allOsCores, totalIrqCount, islandMap, instanceToIsland);
 
         return {
             totalCores: snapshot.topology.length,
             osCores: allOsCores,
-            irqCores: optimizedTopology.irqCores, // List of IDs
+            irqCores: optimizedTopology.irqCores,
             instances: optimizedTopology.instances,
             recommendations: []
         };
@@ -133,7 +120,7 @@ const CPU_OPTIMIZER = {
         const networkNumas = Object.keys(topology.numaInterfaces).map(Number);
         const netGroups = {};
 
-        // Detect Distinct Network Endpoints (e.g. net vs hit)
+        // Detect Distinct Network Endpoints
         networkNumas.forEach(numaId => {
             const ifaces = topology.numaInterfaces[numaId];
             const prefixes = [...new Set(ifaces.map(i => i.replace(/\d+.*$/, '')))];
@@ -150,6 +137,7 @@ const CPU_OPTIMIZER = {
         if (isSplitBrain) {
             distinctGroups.forEach((key, idx) => {
                 const group = netGroups[key];
+                // Use a stable ID based on interfaces/NUMA to map back easily
                 const islandId = `island_${key}`;
                 islands.set(islandId, {
                     id: islandId,
@@ -160,7 +148,6 @@ const CPU_OPTIMIZER = {
                 });
             });
         } else {
-            // Single Group
             const allNetNumas = distinctGroups.length > 0 ? netGroups[distinctGroups[0]].numas : [];
             if (allNetNumas.length > 0) {
                  islands.set('main', {
@@ -173,18 +160,7 @@ const CPU_OPTIMIZER = {
             }
         }
 
-        // Shared Nodes
-        const sharedNumas = topology.numaNodes.filter(n => !networkNumas.includes(n));
-        if (sharedNumas.length > 0) {
-            islands.set('shared', {
-                id: 'shared',
-                type: 'shared',
-                numaNodes: sharedNumas,
-                interfaces: [],
-                osStrategy: 'none'
-            });
-        }
-
+        // Handle cases where no network is defined or fallback
         if (islands.size === 0 && topology.numaNodes.length > 0) {
              islands.set('main', {
                 id: 'main',
@@ -198,107 +174,97 @@ const CPU_OPTIMIZER = {
         return islands;
     },
 
-    extractInstanceGroups(snapshot) {
-        // 1. Identify all instances and their core usage
-        const instMap = new Map(); // instId -> Set(coreIds)
+    mapInstancesToIslands(snapshot, islandMap, topology) {
+        const mapping = new Map();
 
-        snapshot.topology.forEach(c => {
-            c.services.forEach(s => {
-                if (s.instanceId === 'SYSTEM') return;
-                if (!instMap.has(s.instanceId)) instMap.set(s.instanceId, new Set());
-                instMap.get(s.instanceId).add(c.id);
-            });
-        });
+        // Get all known instances
+        const instances = new Set();
+        snapshot.topology.forEach(c => c.services.forEach(s => {
+            if (s.instanceId !== 'SYSTEM') instances.add(s.instanceId);
+        }));
 
-        // 2. Build adjacency (sharing cores)
-        const instances = Array.from(instMap.keys());
-        const adj = new Map();
-        instances.forEach(i => adj.set(i, []));
+        instances.forEach(instId => {
+            // Strategy: Find "Center of Gravity" for this instance
+            // 1. Look for Trash/Fixed roles first (strongest signal)
+            let homeNuma = -1;
 
-        for (let i = 0; i < instances.length; i++) {
-            for (let j = i + 1; j < instances.length; j++) {
-                const idA = instances[i];
-                const idB = instances[j];
-                const coresA = instMap.get(idA);
-                const coresB = instMap.get(idB);
+            // Check specific core roles if available in snapshot
+            const instanceCores = snapshot.topology.filter(c =>
+                c.services.some(s => s.instanceId === instId)
+            );
 
-                // Intersection
-                let shared = false;
-                for (const c of coresA) {
-                    if (coresB.has(c)) { shared = true; break; }
-                }
+            const trashCore = instanceCores.find(c =>
+                c.services.some(s => s.instanceId === instId && (s.name.includes('Trash') || s.name.includes('UDP')))
+            );
 
-                if (shared) {
-                    adj.get(idA).push(idB);
-                    adj.get(idB).push(idA);
-                }
-            }
-        }
-
-        // 3. Find Connected Components (Groups)
-        const visited = new Set();
-        const groups = [];
-
-        instances.forEach(startNode => {
-            if (visited.has(startNode)) return;
-            const component = [];
-            const stack = [startNode];
-            visited.add(startNode);
-
-            while (stack.length > 0) {
-                const node = stack.pop();
-                component.push(node);
-                adj.get(node).forEach(neighbor => {
-                    if (!visited.has(neighbor)) {
-                        visited.add(neighbor);
-                        stack.push(neighbor);
+            if (trashCore) {
+                homeNuma = trashCore.numaNodeId;
+            } else {
+                // Majority Vote
+                const numaCounts = {};
+                let max = 0;
+                instanceCores.forEach(c => {
+                    numaCounts[c.numaNodeId] = (numaCounts[c.numaNodeId] || 0) + 1;
+                    if (numaCounts[c.numaNodeId] > max) {
+                        max = numaCounts[c.numaNodeId];
+                        homeNuma = c.numaNodeId;
                     }
                 });
             }
-            groups.push(component);
+
+            // Map NUMA to Island
+            let assignedIslandId = null;
+            if (homeNuma !== -1) {
+                for (const [islandId, island] of islandMap.entries()) {
+                    if (island.numaNodes.includes(homeNuma)) {
+                        assignedIslandId = islandId;
+                        break;
+                    }
+                }
+            }
+
+            // Fallback: Assign to 'main' or first network island if unmapped
+            if (!assignedIslandId) {
+                const firstNet = Array.from(islandMap.values()).find(i => i.type === 'network');
+                assignedIslandId = firstNet ? firstNet.id : 'main';
+            }
+
+            mapping.set(instId, assignedIslandId);
         });
 
-        // 4. Extract data for each group
-        return groups.map(grpInstances => {
-            // Aggregate loads
+        return mapping;
+    },
+
+    extractInstanceGroups(snapshot) {
+        // Simplified grouping: 1 Group = 1 Instance.
+        // Complex shared-core grouping is often overkill or incorrect for strict HFT separation.
+        // Assuming strict separation is better.
+        const instSet = new Set();
+        snapshot.topology.forEach(c => c.services.forEach(s => {
+            if (s.instanceId !== 'SYSTEM') instSet.add(s.instanceId);
+        }));
+
+        return Array.from(instSet).map(instId => {
+            // Calculate load stats
             let gateways = 0;
             let robots = 0;
             let loadSumGw = 0;
             let loadSumRob = 0;
 
-            const groupInstSet = new Set(grpInstances);
-            const coresUsed = { gateway: new Set(), robot: new Set() };
-            const loadAccum = { gateway: 0, robot: 0 };
-
             snapshot.topology.forEach(c => {
-                let coreHasGw = false;
-                let coreHasRob = false;
-
                 c.services.forEach(s => {
-                    if (groupInstSet.has(s.instanceId)) {
+                    if (s.instanceId === instId) {
                         const type = s.name.toLowerCase();
-                        if (type.includes('gateway')) coreHasGw = true;
-                        if (type.includes('robot')) coreHasRob = true;
+                        if (type.includes('gateway')) { gateways++; loadSumGw += c.currentLoad || 0; }
+                        if (type.includes('robot')) { robots++; loadSumRob += c.currentLoad || 0; }
                     }
                 });
-
-                if (coreHasGw) {
-                    coresUsed.gateway.add(c.id);
-                    loadAccum.gateway += c.currentLoad || 0;
-                }
-                if (coreHasRob) {
-                    coresUsed.robot.add(c.id);
-                    loadAccum.robot += c.currentLoad || 0;
-                }
             });
 
             return {
-                groupId: grpInstances.join('+'),
-                instances: grpInstances,
-                gateways: coresUsed.gateway.size,
-                robots: coresUsed.robot.size,
-                loadSumGw: loadAccum.gateway,
-                loadSumRob: loadAccum.robot
+                groupId: instId,
+                instances: [instId],
+                gateways, robots, loadSumGw, loadSumRob
             };
         });
     },
@@ -307,12 +273,11 @@ const CPU_OPTIMIZER = {
         const gwAvg = grp.gateways > 0 ? grp.loadSumGw / grp.gateways : 0;
         const robAvg = grp.robots > 0 ? grp.loadSumRob / grp.robots : 0;
 
-        // 1. Fixed Cores - One set per GROUP
+        // 1. Fixed Cores
         const fixed = this.CONSTANTS.FIXED_CORES_PER_INST;
 
         // 2. Gateway Cores
         let gwNeeded = 1;
-        // FIX: If load is missing/low (< 1%), assume current capacity is desired/safe default
         if (gwAvg < 1 && grp.gateways > 0) {
             gwNeeded = grp.gateways;
         } else if (grp.gateways > 0) {
@@ -321,9 +286,8 @@ const CPU_OPTIMIZER = {
         }
         gwNeeded = Math.max(1, gwNeeded);
 
-        // 3. Robot Cores
+        // 3. Robot Cores (Initial Demand)
         let robNeeded = 1;
-        // FIX: Same logic for robots. If no load data, don't collapse to 1.
         if (robAvg < 1 && grp.robots > 0) {
             robNeeded = grp.robots;
         } else if (grp.robots > 0) {
@@ -345,6 +309,8 @@ const CPU_OPTIMIZER = {
     },
 
     allocateIslandResources(groups, availableCores, irqCount) {
+        if (groups.length === 0) return [];
+
         let mandatoryTotal = 0;
         groups.forEach(g => mandatoryTotal += g.needs.fixed + g.needs.gateway);
 
@@ -357,22 +323,23 @@ const CPU_OPTIMIZER = {
                 fixed: g.needs.fixed,
                 gateway: g.needs.gateway,
                 robot: 0
-            }
+            },
+            weight: g.needs.total // Use total need as weight for proportional distribution
         }));
 
         if (z < 0) {
-            // Squeeze
+            // Deficit Management
             console.warn(`[Optimizer] CRISIS: Not enough cores! Deficit: ${z}`);
             let remaining = availableCores;
 
-            // 1. Fixed
+            // 1. Fixed (Absolute priority)
             results.forEach(r => {
                 const canTake = Math.min(remaining, r.assigned.fixed);
                 r.assigned.fixed = canTake;
                 remaining -= canTake;
             });
 
-            // 2. Gateway
+            // 2. Gateway (Squeeze)
             if (remaining > 0) {
                 const totalGwDemand = groups.reduce((sum, g) => sum + g.needs.gateway, 0);
                 results.forEach(r => {
@@ -385,43 +352,56 @@ const CPU_OPTIMIZER = {
             results.forEach(r => r.assigned.robot = 0);
 
         } else {
-            // Distribute z
-            // Calculate total weight based on calculated "Needs" (which might be based on current capacity if load is low)
-            const totalNeeds = groups.reduce((sum, g) => sum + g.needs.total, 0);
+            // Surplus Management (Proportional Distribution)
+            // Weight = Total Needs (Size of instance)
+            const totalWeight = groups.reduce((sum, g) => sum + g.needs.total, 0);
 
+            let usedZ = 0;
+            // First pass: Proportional share
             groups.forEach((grp, idx) => {
                 const res = results[idx];
-                const weight = grp.needs.total;
-
-                // Proportional Share of the EXTRA space (z)
-                let robotShare = Math.floor(z * (weight / totalNeeds));
-
-                // FIX: Do NOT cap at needs.robot. Allow robots to consume all available space.
-                // The goal is to maximize performance, not just meet minimum needs.
-                res.assigned.robot = robotShare;
+                const share = Math.floor(z * (grp.needs.total / totalWeight));
+                res.assigned.robot = share;
+                usedZ += share;
             });
+
+            // Distribute remainders (due to floor) to largest instances
+            let remainder = z - usedZ;
+            if (remainder > 0) {
+                const sortedByWeight = [...results].sort((a, b) => b.weight - a.weight);
+                for (let i = 0; i < remainder; i++) {
+                    sortedByWeight[i % sortedByWeight.length].assigned.robot++;
+                }
+            }
+        }
+
+        // =====================================================================
+        // Starvation Protection (Robin Hood)
+        // Ensure every instance has at least 1 Robot core
+        // =====================================================================
+
+        let starving = results.filter(r => r.assigned.robot === 0);
+        let maxIterations = groups.length * 2; // Safety break
+
+        while (starving.length > 0 && maxIterations-- > 0) {
+            // Find rich instances (more than 1 robot)
+            const rich = results.filter(r => r.assigned.robot > 1).sort((a, b) => b.assigned.robot - a.assigned.robot);
+
+            if (rich.length === 0) break; // Cannot redistribute further
+
+            const donor = rich[0];
+            const receiver = starving[0];
+
+            donor.assigned.robot--;
+            receiver.assigned.robot++;
+
+            starving = results.filter(r => r.assigned.robot === 0);
         }
 
         return results;
     },
 
-    distributeSpillover(allocations, sharedCores, allGroupNeeds) {
-        let available = sharedCores.length;
-        if (available <= 0) return;
-
-        // If we have spillover space, just give it to whoever has robots (which is everyone usually)
-        // Weighted by their size
-        const totalAssignedRobots = allocations.reduce((sum, a) => sum + a.assigned.robot, 0);
-
-        if (totalAssignedRobots === 0) return;
-
-        allocations.forEach(alloc => {
-            const share = Math.floor(available * (alloc.assigned.robot / totalAssignedRobots));
-            alloc.assigned.robot += share;
-        });
-    },
-
-    placeServices(allocations, snapshot, osCores, totalIrqNeeded, islandMap) {
+    placeServices(allocations, snapshot, osCores, totalIrqNeeded, islandMap, instanceToIsland) {
         const result = { irqCores: [], instances: [] };
 
         const coreMap = {};
@@ -449,7 +429,7 @@ const CPU_OPTIMIZER = {
             return candidates[0].id;
         };
 
-        // 1. Place IRQs
+        // 1. Place IRQs (Strictly on Network Islands)
         const irqCoresList = [];
         islandMap.forEach((island) => {
             if (island.type !== 'network') return;
@@ -466,33 +446,22 @@ const CPU_OPTIMIZER = {
         });
         result.irqCores = irqCoresList;
 
-        // 2. Place Groups
+        // 2. Place Groups (Strictly on assigned Islands)
         allocations.forEach(alloc => {
             const groupAssignments = [];
             let groupAllocatedCount = 0;
 
-            let targetIsland = null;
             const repInst = alloc.instances[0];
-            const assignedIf = snapshot.instanceToInterface[repInst];
-            for (const island of islandMap.values()) {
-                if (assignedIf && island.interfaces.includes(assignedIf)) {
-                    targetIsland = island;
-                    break;
-                }
-            }
-            if (!targetIsland) {
-                 targetIsland = Array.from(islandMap.values()).find(i => i.type === 'network');
-            }
-
+            const islandId = instanceToIsland.get(repInst);
+            const targetIsland = islandMap.get(islandId);
             const targetNumas = targetIsland ? targetIsland.numaNodes : [];
-            const sharedNumas = islandMap.get('shared') ? islandMap.get('shared').numaNodes : [];
 
             // Helper to assign
-            const assign = (service, role, count, preferenceNumas) => {
+            const assign = (service, role, count) => {
                  const assigned = [];
                  for(let i=0; i<count; i++) {
-                     let c = pickCore({ numas: preferenceNumas });
-                     if (c === null) c = pickCore({ numas: sharedNumas });
+                     // STRICT: Only use targetNumas. No shared spillover for core HFT roles.
+                     let c = pickCore({ numas: targetNumas });
 
                      if (c !== null) {
                          freeCores.delete(c);
@@ -505,16 +474,17 @@ const CPU_OPTIMIZER = {
                  }
             };
 
-            assign('trash_combo', 'trash', 1, targetNumas);
-            assign('udp', 'udp', 1, targetNumas);
-            assign('ar_combo', 'ar', 1, targetNumas);
-            assign('gateway', 'gateway', alloc.assigned.gateway, targetNumas);
+            // Order matters: Trash/UDP first (usually 1 core), then Gateways, then Robots
+            assign('trash_combo', 'trash', 1);
+            assign('udp', 'udp', 1);
+            assign('ar_combo', 'ar', 1);
+            assign('gateway', 'gateway', alloc.assigned.gateway);
 
+            // Robots
             const robotCount = alloc.assigned.robot;
             const robotCores = [];
             for(let i=0; i<robotCount; i++) {
                 let c = pickCore({ numas: targetNumas });
-                if (c === null) c = pickCore({ numas: sharedNumas });
                 if (c !== null) {
                     freeCores.delete(c);
                     robotCores.push(c);
@@ -525,14 +495,15 @@ const CPU_OPTIMIZER = {
                  groupAllocatedCount += robotCores.length;
              }
 
-            // Distribute assignments to all instances in group
+            // Distribute assignments to all instances in group (usually just 1 now)
             alloc.instances.forEach(instId => {
                 result.instances.push({
                     instanceId: instId,
                     allocatedCores: groupAllocatedCount,
                     coreAssignments: groupAssignments,
                     gateway: alloc.assigned.gateway,
-                    robot: alloc.assigned.robot
+                    robot: alloc.assigned.robot,
+                    numaPlacement: { breakdown: { [targetIsland.id]: { isNetwork: true, services: ['ALL'], numaId: targetNumas[0] } } }
                 });
             });
         });

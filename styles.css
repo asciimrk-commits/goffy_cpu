@@ -776,6 +776,13 @@ input:focus, select:focus {
     padding: var(--space-6);
 }
 
+.cmp-stats {
+    display: none; /* Hidden by default */
+}
+#tab-compare.active .cmp-stats {
+    display: flex;
+}
+
 .cmp-side, .opt-results {
     background: var(--bg-surface);
     border-radius: var(--radius-lg);
