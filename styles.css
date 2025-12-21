@@ -616,8 +616,8 @@ select:focus {
 
 /* Logical Core (PU) */
 .core {
-    width: 62px;
-    height: 62px;
+    width: 50px;
+    height: 50px;
     background: var(--neutral-100);
     border: 1px solid var(--neutral-300);
     display: flex;
@@ -625,7 +625,7 @@ select:focus {
     align-items: center;
     justify-content: center;
     font-family: monospace;
-    font-size: 24px;
+    font-size: 18px;
     color: var(--neutral-400);
     cursor: pointer;
     position: relative;
@@ -665,7 +665,7 @@ select:focus {
 }
 
 .core-id {
-    font-size: 24px;
+    font-size: 18px;
     line-height: 1;
     font-weight: 700;
     z-index: 2;
