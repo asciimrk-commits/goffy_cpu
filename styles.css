@@ -492,8 +492,8 @@ select:focus {
 .blueprint {
     display: flex;
     flex-direction: row;
-    flex-wrap: wrap;
-    align-content: flex-start;
+    flex-wrap: nowrap; /* Prevent sockets from stacking */
+    align-items: flex-start;
     gap: var(--space-4);
     transform-origin: center top;
     transition: transform 0.2s ease-out;
@@ -525,8 +525,7 @@ select:focus {
 
 .socket-content {
     display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
+    flex-direction: column; /* Stack NUMAs vertically inside socket */
     gap: var(--space-2);
     flex: 1;
     align-content: flex-start;
@@ -537,6 +536,7 @@ select:focus {
     background: var(--neutral-50);
     border: 1px solid var(--neutral-200);
     padding: var(--space-2);
+    width: 100%; /* Fill socket width */
     min-width: 0;
     display: flex;
     flex-wrap: wrap;
@@ -546,7 +546,7 @@ select:focus {
 }
 
 .numa.is-network {
-    border-color: var(--warning);
+    border: 1px dashed var(--warning); /* Make network distinct */
 }
 
 .numa-label {
@@ -587,12 +587,15 @@ select:focus {
 /* Cores Grid */
 .cores-grid {
     display: grid;
-    /* Auto-fit to ensure cores expand to fill the available space */
-    grid-template-columns: repeat(auto-fit, minmax(28px, 1fr));
+    /* Strict fixed sizing as requested */
+    grid-template-columns: repeat(auto-fill, 32px);
     gap: 1px;
+    justify-content: start;
 }
 
 .core {
+    width: 32px;
+    height: 32px;
     aspect-ratio: 1;
     background: var(--neutral-100);
     border: 1px solid var(--neutral-200);
@@ -606,8 +609,6 @@ select:focus {
     position: relative;
     user-select: none;
     transition: background-color 150ms ease-out, opacity 150ms ease-out;
-    min-width: 24px;
-    min-height: 24px;
 }
 
 .core:hover {
@@ -755,10 +756,10 @@ select:focus {
 .cmp-blueprint {
     display: flex;
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap; /* Side by side sockets */
     gap: var(--space-2);
     overflow-y: auto;
-    align-content: flex-start;
+    align-items: flex-start;
 }
 
 .cmp-socket {
@@ -784,8 +785,7 @@ select:focus {
 
 .cmp-socket-body {
     display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
+    flex-direction: column; /* Stacked NUMAs */
     gap: var(--space-2);
     flex: 1;
 }
