@@ -616,8 +616,8 @@ select:focus {
 
 /* Logical Core (PU) */
 .core {
-    width: 28px;
-    height: 28px;
+    width: 62px;
+    height: 62px;
     background: var(--neutral-100);
     border: 1px solid var(--neutral-300);
     display: flex;
@@ -625,7 +625,7 @@ select:focus {
     align-items: center;
     justify-content: center;
     font-family: monospace;
-    font-size: 9px;
+    font-size: 24px;
     color: var(--neutral-400);
     cursor: pointer;
     position: relative;
@@ -665,26 +665,14 @@ select:focus {
 }
 
 .core-id {
-    font-size: 8px;
+    font-size: 24px;
     line-height: 1;
+    font-weight: 700;
     z-index: 2;
 }
 
 .core-label {
-    position: absolute;
-    bottom: 1px;
-    left: 1px;
-    right: 1px;
-    font-size: 6px;
-    text-align: center;
-    font-weight: 700;
-    color: var(--neutral-900);
-    pointer-events: none;
-    overflow: hidden;
-    white-space: nowrap;
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
-    line-height: 1;
-    z-index: 3;
+    display: none;
 }
 
 .irq-dot {

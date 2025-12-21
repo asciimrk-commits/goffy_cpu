@@ -622,7 +622,7 @@ const HFT = {
                  onmousedown="HFT.onCoreMouseDown(event, '${instanceName}', '${cpu}')"
                  onmouseenter="HFT.onCoreMouseEnter(event, '${instanceName}', '${cpu}')"
                  onmousemove="HFT.moveTooltip(event)" onmouseleave="HFT.hideTooltip()">
-            <div class="core-id">PU #${cpu}</div>
+            <div class="core-id">${cpu}</div>
             ${hasIRQ ? '<div class="irq-dot"></div>' : ''}
             <div class="core-label"></div>
             <div class="load-overlay" style="height:${load}%;background:${loadColor}"></div>
@@ -660,9 +660,7 @@ const HFT = {
                 activeInst = inst;
             }
         });
-        if (activeInst) {
-            el.querySelector('.core-label').textContent = activeInst;
-        }
+        // Label removed (display: none in CSS)
 
         // Instance Highlighting Logic
         if (this.state.selectedInstance !== 'Physical') {
@@ -2055,7 +2053,7 @@ const HFT = {
                             if (roles.length === 0) classes += ' isolated';
 
                             html += `<div class="${classes}" style="${style}" title="${instName} ${roles.join(',')}">
-                                <div class="core-id">PU #${cpu}</div>
+                                <div class="core-id">${cpu}</div>
                                 <div class="core-label">${instName}</div>
                             </div>`;
                         });
