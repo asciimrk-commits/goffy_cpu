@@ -539,14 +539,14 @@ select:focus {
     padding: var(--space-2);
     min-width: 0;
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column; /* Vertical Stacking */
     flex: 1 1 auto;
-    gap: var(--space-1);
-    align-content: start;
+    gap: var(--space-2);
 }
 
 .numa.is-network {
     border-color: var(--warning);
+    border-style: dashed;
 }
 
 .numa-label {
@@ -572,48 +572,79 @@ select:focus {
     margin-bottom: 0;
     background: var(--neutral-100);
     border: 1px solid var(--neutral-200);
-    padding: 4px;
+    padding: 8px;
     flex: 1 1 auto;
-    min-width: 100px; /* Prevent becoming too narrow */
+    display: flex;
+    flex-direction: column;
 }
 
 .l3-label {
-    font-size: 8px;
+    font-size: 10px;
     color: var(--neutral-400);
-    margin-bottom: 2px;
-    text-align: center;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--neutral-200);
+    padding-bottom: 2px;
+    text-transform: uppercase;
+    font-weight: 600;
 }
 
-/* Cores Grid */
+/* Cores Grid inside L3 - Holds Physical Cores */
 .cores-grid {
-    display: grid;
-    /* Auto-fit to ensure cores expand to fill the available space */
-    grid-template-columns: repeat(auto-fit, minmax(28px, 1fr));
-    gap: 1px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
-.core {
-    aspect-ratio: 1;
-    background: var(--neutral-100);
-    border: 1px solid var(--neutral-200);
+/* Physical Core Container */
+.phy-core {
+    background: var(--neutral-50);
+    border: 1px solid var(--neutral-200); /* Sharp border */
+    padding: 2px;
     display: flex;
+    flex-direction: column;
+    min-width: 60px;
+}
+
+.phy-label {
+    font-size: 9px;
+    text-align: center;
+    background: var(--neutral-200);
+    color: var(--neutral-800);
+    padding: 2px;
+    margin-bottom: 2px;
+    font-weight: 700;
+}
+
+.phy-content {
+    display: flex;
+    justify-content: center;
+    gap: 2px;
+    padding: 2px;
+}
+
+/* Logical Core (PU) */
+.core {
+    width: 28px;
+    height: 28px;
+    background: var(--neutral-100);
+    border: 1px solid var(--neutral-300);
+    display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     font-family: monospace;
-    font-size: 10px;
+    font-size: 9px;
     color: var(--neutral-400);
     cursor: pointer;
     position: relative;
     user-select: none;
-    transition: background-color 150ms ease-out, opacity 150ms ease-out;
-    min-width: 24px;
-    min-height: 24px;
+    transition: all 150ms ease-out;
 }
 
 .core:hover {
     background: var(--neutral-200);
     z-index: 10;
-    border-color: var(--neutral-400);
+    border-color: var(--neutral-500);
 }
 
 .core.has-role {
@@ -641,6 +672,12 @@ select:focus {
     filter: grayscale(100%);
 }
 
+.core-id {
+    font-size: 8px;
+    line-height: 1;
+    z-index: 2;
+}
+
 .core-label {
     position: absolute;
     bottom: 1px;
@@ -655,6 +692,7 @@ select:focus {
     white-space: nowrap;
     text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
     line-height: 1;
+    z-index: 3;
 }
 
 .irq-dot {
@@ -664,21 +702,18 @@ select:focus {
     width: 4px;
     height: 4px;
     background: var(--error);
-    border-radius: 0;
-    /* Sharp */
+    border-radius: 50%;
+    z-index: 4;
 }
 
-.load-bar {
+.load-overlay {
     position: absolute;
     bottom: 0;
     left: 0;
     width: 100%;
-    height: 3px;
-    background: var(--neutral-200);
-}
-
-.load-fill {
-    height: 100%;
+    opacity: 0.3;
+    z-index: 1;
+    pointer-events: none;
 }
 
 /* Tooltip */

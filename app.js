@@ -191,7 +191,7 @@ const HFT = {
         const currentSelection = this.state && this.state.selectedInstance ? this.state.selectedInstance : 'Physical';
 
         this.state = {
-            serverName: '', geometry: {}, coreNumaMap: {}, l3Groups: {},
+            serverName: '', geometry: {}, coreNumaMap: {}, corePhysicalMap: {}, l3Groups: {},
             netNumaNodes: new Set(), isolatedCores: new Set(), coreIRQMap: {},
             cpuLoadMap: {}, instances: { Physical: {} }, networkInterfaces: [],
             coreBenderMap: {}, instanceToInterface: {},
@@ -237,10 +237,12 @@ const HFT = {
                 if (line.startsWith('CPU') || line.startsWith('#')) continue;
                 const parts = line.split(',');
                 if (parts.length < 5) continue;
-                const [cpu, node, socket, , l3id] = parts.map(p => p.trim());
+                const [cpu, node, socket, core, l3id] = parts.map(p => p.trim());
                 if (node === '-' || socket === '-') continue;
 
                 this.state.coreNumaMap[cpu] = node;
+                this.state.corePhysicalMap[cpu] = core; // Store Physical Core ID
+
                 if (!this.state.geometry[socket]) this.state.geometry[socket] = {};
                 if (!this.state.geometry[socket][node]) this.state.geometry[socket][node] = {};
                 const l3 = l3id || node;
@@ -263,6 +265,8 @@ const HFT = {
                         const cpuStr = cpu.toString();
                         if (!this.state.coreNumaMap[cpuStr]) {
                             this.state.coreNumaMap[cpuStr] = node;
+                            // Fallback: Physical Core ID = CPU ID
+                            this.state.corePhysicalMap[cpuStr] = cpuStr;
 
                             // Определяем socket по номеру NUMA (2 NUMA на сокет обычно)
                             const socket = Math.floor(parseInt(node) / 2).toString();
@@ -577,8 +581,16 @@ const HFT = {
                     <div class="l3-label">L3 Cache #${l3Id}</div>
                     <div class="cores-grid">`;
 
-                numaData[numaId][l3Id].forEach(cpu => {
-                    html += this.renderCore('Physical', cpu);
+                const cores = numaData[numaId][l3Id];
+                const phyGroups = {};
+                cores.forEach(cpu => {
+                    const phy = this.state.corePhysicalMap[cpu] || cpu;
+                    if (!phyGroups[phy]) phyGroups[phy] = [];
+                    phyGroups[phy].push(cpu);
+                });
+
+                Object.keys(phyGroups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(phyId => {
+                    html += this.renderPhysicalCore(phyId, phyGroups[phyId]);
                 });
 
                 html += `</div></div>`;
@@ -586,6 +598,18 @@ const HFT = {
             html += `</div>`;
         });
 
+        html += `</div></div>`;
+        return html;
+    },
+
+    renderPhysicalCore(phyId, cpus) {
+        cpus.sort((a, b) => parseInt(a) - parseInt(b));
+        let html = `<div class="phy-core">
+            <div class="phy-label">Core P#${phyId}</div>
+            <div class="phy-content">`;
+        cpus.forEach(cpu => {
+            html += this.renderCore('Physical', cpu);
+        });
         html += `</div></div>`;
         return html;
     },
@@ -599,10 +623,10 @@ const HFT = {
                  onmousedown="HFT.onCoreMouseDown(event, '${instanceName}', '${cpu}')"
                  onmouseenter="HFT.onCoreMouseEnter(event, '${instanceName}', '${cpu}')"
                  onmousemove="HFT.moveTooltip(event)" onmouseleave="HFT.hideTooltip()">
-            ${cpu}
-            <div class="load-bar"><div class="load-fill" style="width:${load}%;background:${loadColor}"></div></div>
+            <div class="core-id">PU #${cpu}</div>
             ${hasIRQ ? '<div class="irq-dot"></div>' : ''}
             <div class="core-label"></div>
+            <div class="load-overlay" style="height:${load}%;background:${loadColor}"></div>
         </div>`;
     },
 
@@ -1279,13 +1303,17 @@ const HFT = {
         this.state.isolatedCores = new Set(config.isolatedCores || []);
         this.state.instances = {};
         this.state.coreNumaMap = {};
+        this.state.corePhysicalMap = config.corePhysicalMap || {};
         this.state.coreBenderMap = config.coreBenderMap || {};
 
 
         Object.entries(this.state.geometry).forEach(([socket, numaData]) => {
             Object.entries(numaData).forEach(([numa, l3Data]) => {
                 Object.entries(l3Data).forEach(([l3, cores]) => {
-                    cores.forEach(cpu => { this.state.coreNumaMap[cpu] = numa; });
+                    cores.forEach(cpu => {
+                        this.state.coreNumaMap[cpu] = numa;
+                        if (!this.state.corePhysicalMap[cpu]) this.state.corePhysicalMap[cpu] = cpu;
+                    });
                 });
             });
         });
@@ -1998,37 +2026,41 @@ const HFT = {
                         <div class="l3-label">L3 #${l3Id}</div>
                         <div class="cores-grid">`;
 
-                    geometry[socketId][numaId][l3Id].forEach(cpu => {
-                        const cpuStr = String(cpu);
-                        const roles = roleMap[cpuStr] ? Array.from(roleMap[cpuStr]) : [];
-                        const instName = instanceMap[cpuStr] || '';
+                    const cores = geometry[socketId][numaId][l3Id];
+                    const phyGroups = {};
+                    cores.forEach(cpu => {
+                        const phy = this.state.corePhysicalMap[cpu] || cpu;
+                        if (!phyGroups[phy]) phyGroups[phy] = [];
+                        phyGroups[phy].push(cpu);
+                    });
 
-                        // Visual styling
-                        let style = '';
-                        let classes = 'core';
+                    Object.keys(phyGroups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(phyId => {
+                        html += `<div class="phy-core"><div class="phy-label">Core P#${phyId}</div><div class="phy-content">`;
 
-                        // Pick highest priority role color
-                        if (roles.length > 0) {
-                            // Simple priority sort based on HFT_RULES
-                            roles.sort((a, b) => (HFT_RULES.roles[b]?.priority || 0) - (HFT_RULES.roles[a]?.priority || 0));
-                            const primaryRole = roles[0];
-                            const roleDef = HFT_RULES.roles[primaryRole];
-                            if (roleDef) {
-                                style = `background:${roleDef.color};border-color:${roleDef.color}`;
-                                classes += ' has-role';
+                        phyGroups[phyId].sort((a,b)=>a-b).forEach(cpu => {
+                            const cpuStr = String(cpu);
+                            const roles = roleMap[cpuStr] ? Array.from(roleMap[cpuStr]) : [];
+                            const instName = instanceMap[cpuStr] || '';
+                            let style = '';
+                            let classes = 'core';
+
+                            if (roles.length > 0) {
+                                roles.sort((a, b) => (HFT_RULES.roles[b]?.priority || 0) - (HFT_RULES.roles[a]?.priority || 0));
+                                const primaryRole = roles[0];
+                                const roleDef = HFT_RULES.roles[primaryRole];
+                                if (roleDef) {
+                                    style = `background:${roleDef.color};border-color:${roleDef.color}`;
+                                    classes += ' has-role';
+                                }
                             }
-                        }
+                            if (roles.length === 0) classes += ' isolated';
 
-                        // Isolated look (everything assigned here effectively is isolated or managed)
-                        // but let's visually distinguish free cores?
-                        if (roles.length === 0) {
-                            classes += ' isolated'; // Treat unassigned as isolated/unused
-                        }
-
-                        html += `<div class="${classes}" style="${style}" title="${instName} ${roles.join(',')}">
-                            ${cpu}
-                            <div class="core-label">${instName}</div>
-                        </div>`;
+                            html += `<div class="${classes}" style="${style}" title="${instName} ${roles.join(',')}">
+                                <div class="core-id">PU #${cpu}</div>
+                                <div class="core-label">${instName}</div>
+                            </div>`;
+                        });
+                        html += `</div></div>`;
                     });
 
                     html += `</div></div>`;
@@ -2374,6 +2406,7 @@ net0: 0-31
                 serverName: this.state.serverName,
                 geometry: this.state.geometry,
                 coreNumaMap: this.state.coreNumaMap,
+                corePhysicalMap: this.state.corePhysicalMap,
                 coreSocketMap: this.state.coreSocketMap,
                 isolatedCores: [...this.state.isolatedCores],
                 netNumaNodes: [...this.state.netNumaNodes],
