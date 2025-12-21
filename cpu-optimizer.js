@@ -15,11 +15,16 @@ const CPU_OPTIMIZER = {
     // Optimization Constants
     CONSTANTS: {
         FIXED_CORES_PER_INST: 3, // Trash/RF/Click + UDP + AR/Formula
-        IRQ_CORES_SINGLE: 4,     // Fixed IRQ for Single Island
-        IRQ_CORES_SPLIT: 3,      // Fixed IRQ per Island in Split Brain
         OS_RATIO: 0.1,           // 10% of cores
         MIN_OS_CORES: 2,         // Safety minimum
         GATEWAY_BUFFER: 1.2      // 20% buffer for Gateway calculation
+    },
+
+    getIrqCount(totalCores) {
+        if (totalCores <= 16) return 1;
+        if (totalCores <= 48) return 2;
+        if (totalCores <= 96) return 3;
+        return 4;
     },
 
     optimize(snapshot) {
@@ -69,7 +74,8 @@ const CPU_OPTIMIZER = {
                 // Retry Loop for Resource Allocation
                 // Fallbacks: 1. Reduce IRQ (if > 2), 2. Reduce Gateway (if > 1)
                 const netIslands = Array.from(islandMap.values()).filter(i => i.type === 'network');
-                const defaultIrq = netIslands.length > 1 ? this.CONSTANTS.IRQ_CORES_SPLIT : this.CONSTANTS.IRQ_CORES_SINGLE;
+                // Calculate IRQ based on total available cores on this Island
+                const defaultIrq = this.getIrqCount(totalIslandCores);
 
                 let finalAlloc = null;
                 let currentIrq = defaultIrq;
