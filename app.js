@@ -1925,6 +1925,123 @@ const HFT = {
         }
     },
 
+    renderProposedMap(result) {
+        // Build a lookup map for the proposed configuration
+        const roleMap = {}; // cpu -> Set(roles)
+        const instanceMap = {}; // cpu -> instanceName
+
+        // 1. OS Cores
+        if (result.osCores) {
+            result.osCores.forEach(cpu => {
+                const c = String(cpu);
+                if (!roleMap[c]) roleMap[c] = new Set();
+                roleMap[c].add('sys_os');
+                instanceMap[c] = 'Physical';
+            });
+        }
+
+        // 2. IRQ Cores
+        if (result.irqCores) {
+            result.irqCores.forEach(cpu => {
+                const c = String(cpu);
+                if (!roleMap[c]) roleMap[c] = new Set();
+                roleMap[c].add('net_irq');
+                instanceMap[c] = 'Physical';
+            });
+        }
+
+        // 3. Instance Assignments
+        if (result.instances) {
+            result.instances.forEach(inst => {
+                const instName = inst.instanceId;
+                if (inst.coreAssignments) {
+                    inst.coreAssignments.forEach(assign => {
+                        let roleId = 'sys_os';
+                        const svc = assign.service.toLowerCase();
+
+                        if (svc === 'gateway') roleId = 'gateway';
+                        else if (svc === 'robot') roleId = 'robot_default';
+                        else if (svc === 'trash_combo') roleId = 'trash'; // visual simplification
+                        else if (svc === 'udp') roleId = 'udp';
+                        else if (svc === 'ar_combo') roleId = 'ar';
+
+                        assign.cores.forEach(cpu => {
+                            const c = String(cpu);
+                            if (!roleMap[c]) roleMap[c] = new Set();
+                            roleMap[c].add(roleId);
+                            instanceMap[c] = instName;
+                        });
+                    });
+                }
+            });
+        }
+
+        // Render Geometry (reuse Physical geometry)
+        const geometry = this.state.geometry;
+        let html = '<div class="blueprint proposed-map">';
+
+        Object.keys(geometry).sort((a, b) => parseInt(a) - parseInt(b)).forEach(socketId => {
+            html += `<div class="socket">
+                <div class="socket-label">Socket ${socketId}</div>
+                <div class="socket-content">`;
+
+            Object.keys(geometry[socketId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(numaId => {
+                const isNetwork = this.state.netNumaNodes.has(numaId);
+                html += `<div class="numa ${isNetwork ? 'is-network' : ''}">
+                    <div class="numa-label">
+                        <span>NUMA ${numaId}</span>
+                        ${isNetwork ? '<span class="network-badge">NET</span>' : ''}
+                    </div>`;
+
+                Object.keys(geometry[socketId][numaId]).sort((a, b) => parseInt(a) - parseInt(b)).forEach(l3Id => {
+                    html += `<div class="l3">
+                        <div class="l3-label">L3 #${l3Id}</div>
+                        <div class="cores-grid">`;
+
+                    geometry[socketId][numaId][l3Id].forEach(cpu => {
+                        const cpuStr = String(cpu);
+                        const roles = roleMap[cpuStr] ? Array.from(roleMap[cpuStr]) : [];
+                        const instName = instanceMap[cpuStr] || '';
+
+                        // Visual styling
+                        let style = '';
+                        let classes = 'core';
+
+                        // Pick highest priority role color
+                        if (roles.length > 0) {
+                            // Simple priority sort based on HFT_RULES
+                            roles.sort((a, b) => (HFT_RULES.roles[b]?.priority || 0) - (HFT_RULES.roles[a]?.priority || 0));
+                            const primaryRole = roles[0];
+                            const roleDef = HFT_RULES.roles[primaryRole];
+                            if (roleDef) {
+                                style = `background:${roleDef.color};border-color:${roleDef.color}`;
+                                classes += ' has-role';
+                            }
+                        }
+
+                        // Isolated look (everything assigned here effectively is isolated or managed)
+                        // but let's visually distinguish free cores?
+                        if (roles.length === 0) {
+                            classes += ' isolated'; // Treat unassigned as isolated/unused
+                        }
+
+                        html += `<div class="${classes}" style="${style}" title="${instName} ${roles.join(',')}">
+                            ${cpu}
+                            <div class="core-label">${instName}</div>
+                        </div>`;
+                    });
+
+                    html += `</div></div>`;
+                });
+                html += `</div>`;
+            });
+            html += `</div></div>`;
+        });
+
+        html += '</div>';
+        return html;
+    },
+
     createOptimizerSnapshot() {
         const s = this.state;
         const topology = [];
@@ -2039,85 +2156,34 @@ const HFT = {
     renderOptimizationResults(result) {
         let html = '<div class="opt-results">';
 
-        // Header Stats
+        // 1. Stats Bar
         html += `<div class="opt-stats">
             <div class="opt-stat-item"><span>Total Cores</span><strong>${result.totalCores}</strong></div>
             <div class="opt-stat-item"><span>OS Cores</span><strong>${result.osCores.length}</strong></div>
-            <div class="opt-stat-item"><span>IRQ Cores</span><strong>${result.irqCores}</strong></div>
+            <div class="opt-stat-item"><span>IRQ Cores</span><strong>${result.irqCores ? result.irqCores.length : 0}</strong></div>
         </div>`;
 
-        // Instances breakdown
-        result.instances.forEach(inst => {
-            const isAllocated = inst.allocatedCores > 0;
-            const score = inst.totalScore || 0;
+        // 2. Visual Topology Map (New Feature)
+        html += '<div class="opt-visual-map">';
+        html += '<h3>Proposed Topology</h3>';
+        html += this.renderProposedMap(result);
+        html += '</div>';
 
+        // 3. Instance Details (Compact List)
+        html += '<h3>Instance Breakdown</h3>';
+        html += '<div class="opt-grid">';
+        result.instances.forEach(inst => {
             html += `<div class="opt-instance">
                 <div class="opt-inst-header">
                     <h3>${inst.instanceId}</h3>
-                    <div class="opt-inst-score">Score: ${score}</div>
+                    <div class="opt-inst-score">Alloc: ${inst.allocatedCores}</div>
                 </div>
                 <div class="opt-inst-details">
-                    <div>Allocated: <strong>${inst.allocatedCores}</strong> cores</div>
-                    <div>Needs: GW:${inst.gateway} | Rob:${inst.robot}</div>
-                </div>`;
-
-            // Placement details
-            if (inst.numaPlacement && inst.numaPlacement.breakdown) {
-                html += `<div class="opt-placement">`;
-                Object.values(inst.numaPlacement.breakdown).forEach(bd => {
-                    const type = bd.isNetwork ? 'Network' : 'Remote';
-                    html += `<div class="opt-numa-bd ${bd.isNetwork ? 'is-net' : ''}">
-                        NUMA ${bd.numaId} (${type}): ${bd.services.join(', ')}
-                    </div>`;
-                });
-                html += `</div>`;
-            }
-
-            // Assigned Cores
-            if (inst.coreAssignments) {
-                html += `<div class="opt-cores-list">`;
-                inst.coreAssignments.forEach(assign => {
-                    const coresStr = this.formatCoreRange(assign.cores);
-                    const svc = assign.service.toLowerCase();
-                    let roleId = 'sys_os';
-
-                    if (svc === 'gateway') roleId = 'gateway';
-                    else if (svc === 'robot') roleId = 'robot_default';
-                    else if (svc === 'trash' || svc === 'trash_combo') roleId = 'trash';
-                    else if (svc === 'udp') roleId = 'udp';
-                    else if (svc === 'ar' || svc === 'ar_combo') roleId = 'ar';
-                    else if (svc === 'rf') roleId = 'rf';
-                    else if (svc === 'formula') roleId = 'formula';
-                    else if (svc === 'click') roleId = 'click'; // clickhouse maps to click
-                    else if (svc === 'clickhouse') roleId = 'click';
-                    else if (svc === 'irq') roleId = 'net_irq';
-                    else if (svc === 'os') roleId = 'sys_os';
-
-                    const roleColor = HFT_RULES.roles[roleId]?.color || '#888';
-
-                    html += `<div class="opt-core-group" style="border-left: 3px solid ${roleColor}">
-                        <span class="opt-svc-name">${assign.service}</span>
-                        <span class="opt-svc-cores">${coresStr}</span>
-                    </div>`;
-                });
-                html += `</div>`;
-            }
-
-            html += `</div>`;
+                    <div>GW: ${inst.gateway} | Rob: ${inst.robot}</div>
+                </div>
+            </div>`;
         });
-
-        // Global Recommendations
-        if (result.recommendations && result.recommendations.length > 0) {
-            html += `<div class="opt-recs"><h3>Recommendations</h3>`;
-            result.recommendations.forEach(rec => {
-                rec.changes.forEach(change => {
-                    html += `<div class="opt-rec-item ${rec.priorities.includes('critical') ? 'critical' : ''}">
-                        <strong>${rec.instanceId}</strong>: ${change.service} - ${change.reason}
-                    </div>`;
-                });
-            });
-            html += `</div>`;
-        }
+        html += '</div>';
 
         html += '</div>';
         return html;
