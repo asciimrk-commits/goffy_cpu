@@ -584,18 +584,38 @@ select:focus {
     text-align: center;
 }
 
-/* Cores Grid */
-.cores-grid {
-    display: grid;
-    /* Strict fixed sizing as requested */
-    grid-template-columns: repeat(auto-fill, 32px);
-    gap: 1px;
-    justify-content: start;
+/* Physical Cores Grid (inside L3) */
+.phy-cores-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
 }
 
+/* Physical Core Box */
+.phy-core {
+    border: 1px solid var(--neutral-300);
+    background: var(--neutral-50);
+    padding: 2px;
+    display: flex;
+    flex-direction: column;
+}
+
+.phy-core-label {
+    font-size: 7px;
+    color: var(--neutral-500);
+    margin-bottom: 2px;
+    text-align: center;
+}
+
+.pu-container {
+    display: flex;
+    gap: 1px;
+}
+
+/* Logical Core (PU) */
 .core {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     aspect-ratio: 1;
     background: var(--neutral-100);
     border: 1px solid var(--neutral-200);
@@ -603,7 +623,7 @@ select:focus {
     align-items: center;
     justify-content: center;
     font-family: monospace;
-    font-size: 10px;
+    font-size: 9px;
     color: var(--neutral-400);
     cursor: pointer;
     position: relative;
@@ -1199,4 +1219,41 @@ select:focus {
 .tab-content.active {
     display: block;
     overflow-y: auto;
+}
+/* Compare Mode - Nested Structure */
+.cmp-phy-cores-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1px;
+}
+
+.cmp-phy-core {
+    border: 1px solid var(--neutral-200);
+    background: var(--neutral-50);
+    padding: 1px;
+    display: flex;
+    flex-direction: column;
+}
+
+.cmp-pu-container {
+    display: flex;
+    gap: 1px;
+}
+
+/* Ensure cmp-core inside container has fixed size or fills correctly */
+.cmp-core {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    font-size: 8px;
+    /* Remove aspect-ratio: 1 to prevent fighting with flex if needed, but keeping it is usually fine */
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--neutral-100);
+    border: 1px solid var(--neutral-200);
+    color: var(--neutral-400);
+    font-family: monospace;
 }
