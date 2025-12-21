@@ -605,7 +605,6 @@ const HFT = {
     renderPhysicalCore(phyId, cpus) {
         cpus.sort((a, b) => parseInt(a) - parseInt(b));
         let html = `<div class="phy-core">
-            <div class="phy-label">Core P#${phyId}</div>
             <div class="phy-content">`;
         cpus.forEach(cpu => {
             html += this.renderCore('Physical', cpu);
@@ -2035,7 +2034,7 @@ const HFT = {
                     });
 
                     Object.keys(phyGroups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(phyId => {
-                        html += `<div class="phy-core"><div class="phy-label">Core P#${phyId}</div><div class="phy-content">`;
+                        html += `<div class="phy-core"><div class="phy-content">`;
 
                         phyGroups[phyId].sort((a,b)=>a-b).forEach(cpu => {
                             const cpuStr = String(cpu);
