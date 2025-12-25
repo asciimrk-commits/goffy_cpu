@@ -1,0 +1,232 @@
+Пусть мы можем разместить инстанс на R ядрах (N ядер сервера - N/10 ядер операционной системы - N/12 ядрер IRQ (кол-во ядер IRQ должно быть обязательно четным) = R )
+нам Обязательно для каждого инстанса нужно будет разместить ядра Trash, UDP, AR, RF >  на 1 ядро мы определяем следующие пары сервисов: Trash + RF (опционально, если того требует инстанс можем на это же ядро определить Clickhouse) | 1 ядро под UDPrx и UDPtx, они должны жить на одном ядре | 1 ядро под AR (опционально можем определить на это же ядро сервис Formula, если того требует инстанс) - все эти сервисы должны быть на сетевой ноде, 
+Далее нам необходимо посчитать кол-во ядер под сервисы логики и получения MD, R - 3 = Z
+Гейтвеи - обязательно на сетевой ноде, должны занимать  Z * 1/4 ядер
+Роботы - могут быть как на сетевой так и нет, Занимают оставшиеся ядра - Z * 3/4 
+
+Это основные моменты, далее про кэши, у нас 2 задачи, не засорять L3 кэш важных сервисов, и по возможности объеденять кэши зависимых сервисов
+любые сервисные потоки лучше держать подальше от кэшей важных процессов 
+условно 
+сервер - 32 ядра
+Numa node - 2 шт, каждая по 16 ядер
+Ядер OS = 32 / 10 = 3.2 (округляем до 3х)
+Ядер IRQ = 32/12 = 2,6 (округляем до 3х, но IRQ ядер может быть только четное кол-во, смотрим какое четное число ближе к  2,6: 2 или 4, 2 ближе > IRQ ядра = 2)
+Trash + RF (+Clickhouse опционально) - 1 ядро
+UDP - 1 ядро
+AR (+Formula опционально) - 1 ядро 
+
+Numa0 - Сетевая, на ней 2 l3 кэш пула, ядра 0-7 и 8-15
+
+Ядра гейтвеев должны оставаться в одном чистом L3 кэшэ для лучшей производительности и не делить их с другими сервисами 
+высчитаем количество ядер для Получения MD и логики  Z = 32 - 3 - 2 - 1 - 1 - 1 = 24 
+Кол-во ядер Gateway:  Z * 1/4 = 6
+Кол-во ядер Роботов: Z * 3/4 = 18 
+
+По условию ядра Gateway нужно стремиться расположить в чистом L3 кэше если это возможно > На сетевой Numa0 L3#1 кэш отдаем под OS + IRQ + Service (8 ядер, 0-7)
+L3#2 кэш на сетевой Numa0 отдаются Gateway (6 ядер, 8-13)
+
+Все ядра Numa1 (16 ядер) + 2 ядра Numa0 L3#2 (13-15) - достаются роботам (18 ядер необходимо)
+
+
+В случае если на 1ом физическом сервере больше одного экземпляра BenderServer, нам на вход подается текущая конфигурация распределений ядер между всеми инстансами на физическом сервере 
+
+Нужно учитывать что самое минимальное количество ядер под инстанс это 5
+Trash + RF (+Clickhouse опционально) - 1 
+UDP (При жестком дефиците можно разместить на Trash ядре и сократить необходимое кол-во ядер до 4х)- 1 
+AR (+ Formula опционально) - 1
+Gateway - 1 
+Robot - 1
+
+Конфигурация для примера: 
+
+@@BENDER@@
+Cpus overview:
+_________________
+{'cpu_id': 0}
+{'cpu_id': 1}
+{'cpu_id': 2, 'isolated': True, 'TrashCPU': ['MDR1'], 'AllRobotsThCPU': ['MDR1'], 'RemoteFormulaCPU': ['MDR1'], 'RobotsDefault': ['MDR1']}
+{'cpu_id': 3, 'isolated': True, 'GatewaysDefault': ['MDR1']}
+{'cpu_id': 4, 'isolated': True, 'GatewaysDefault': ['MDR1']}
+{'cpu_id': 5, 'isolated': True, 'GatewaysDefault': ['MDR1']}
+{'cpu_id': 6, 'isolated': True, 'UdpSendCores': ['MDR1'], 'UdpReceiveCores': ['MDR1']}
+{'cpu_id': 7, 'isolated': True, 'TrashCPU': ['BEA1'], 'RobotsDefault': ['BEA1']}
+{'cpu_id': 8, 'isolated': True, 'AllRobotsThCPU': ['BEA1'], 'GatewaysDefault': ['BEA1']}
+{'cpu_id': 9, 'isolated': True, 'RemoteFormulaCPU': ['BEA1'], 'GatewaysDefault': ['BEA1']}
+{'cpu_id': 10, 'isolated': True, 'GatewaysDefault': ['BEA1']}
+{'cpu_id': 11, 'isolated': True, 'UdpSendCores': ['BEA1'], 'UdpReceiveCores': ['BEA1']}
+{'cpu_id': 12, 'isolated': True, 'TrashCPU': ['EXT1'], 'Formula': ['EXT1'], 'ClickHouseCores': ['EXT1']}
+{'cpu_id': 13, 'isolated': True, 'AllRobotsThCPU': ['EXT1'], 'RemoteFormulaCPU': ['EXT1'], 'GatewaysDefault': ['EXT1']}
+{'cpu_id': 14, 'isolated': True, 'GatewaysDefault': ['EXT1'], 'UdpSendCores': ['EXT1'], 'UdpReceiveCores': ['EXT1']}
+{'cpu_id': 15, 'isolated': True, 'RobotsDefault': ['EXT1']}
+{'cpu_id': 16, 'isolated': True, 'TrashCPU': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 17, 'isolated': True, 'TrashCPU': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 18, 'isolated': True, 'AllRobotsThCPU': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38'], 'RemoteFormulaCPU': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 19, 'isolated': True, 'UdpSendCores': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38'], 'UdpReceiveCores': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 20, 'isolated': True, 'RobotsDefault': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 21, 'isolated': True, 'GatewaysDefault': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 22, 'isolated': True, 'GatewaysDefault': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 23, 'isolated': True, 'GatewaysDefault': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 24, 'isolated': True, 'GatewaysDefault': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 25, 'isolated': True, 'GatewaysDefault': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 26, 'isolated': True, 'GatewaysDefault': ['DS30', 'DS31', 'DS32', 'DS36', 'DS38']}
+{'cpu_id': 27, 'isolated': True}
+{'cpu_id': 28, 'isolated': True}
+{'cpu_id': 29, 'isolated': True, 'net_cpu': ['net0', 'net1']}
+{'cpu_id': 30, 'isolated': True, 'net_cpu': ['net0', 'net1']}
+{'cpu_id': 31, 'isolated': True, 'net_cpu': ['net0', 'net1']}
+{'cpu_id': 32, 'isolated': True, 'TrashCPU': ['OMM1']}
+{'cpu_id': 33, 'isolated': True, 'AllRobotsThCPU': ['OMM1']}
+{'cpu_id': 34, 'isolated': True, 'RemoteFormulaCPU': ['OMM1']}
+{'cpu_id': 35, 'isolated': True, 'UdpSendCores': ['OMM1'], 'UdpReceiveCores': ['OMM1']}
+{'cpu_id': 36, 'isolated': True, 'Formula': ['OMM1']}
+{'cpu_id': 37, 'isolated': True, 'GatewaysDefault': ['OMM1']}
+{'cpu_id': 38, 'isolated': True, 'GatewaysDefault': ['OMM1']}
+{'cpu_id': 39, 'isolated': True, 'GatewaysDefault': ['OMM1']}
+{'cpu_id': 40, 'isolated': True, 'GatewaysDefault': ['OMM1']}
+{'cpu_id': 41, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 42, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 43, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 44, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 45, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 46, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 47, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 48, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 49, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 50, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 51, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 52, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 53, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 54, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 55, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 56, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 57, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 58, 'isolated': True, 'RobotsDefault': ['OMM1']}
+{'cpu_id': 59, 'isolated': True, 'net_cpu': ['hit0', 'hit1']}
+{'cpu_id': 60, 'isolated': True, 'net_cpu': ['hit0', 'hit1']}
+{'cpu_id': 61, 'isolated': True, 'net_cpu': ['hit0', 'hit1']}
+{'cpu_id': 62}
+{'cpu_id': 63}
+
+Instance overview:
+_________________
+BEA1:
+{'AllRobotsThCPU': [8],
+ 'GatewaysDefault': [8, 9, 10],
+ 'RemoteFormulaCPU': [9],
+ 'RobotsDefault': [7],
+ 'TrashCPU': [7],
+ 'UdpReceiveCores': [11],
+ 'UdpSendCores': [11]}
+DS30:
+{'AllRobotsThCPU': [18],
+ 'GatewaysDefault': [21, 22, 23, 24, 25, 26],
+ 'RemoteFormulaCPU': [18],
+ 'RobotsDefault': [20],
+ 'TrashCPU': [16, 17],
+ 'UdpReceiveCores': [19],
+ 'UdpSendCores': [19]}
+DS31:
+{'AllRobotsThCPU': [18],
+ 'GatewaysDefault': [21, 22, 23, 24, 25, 26],
+ 'RemoteFormulaCPU': [18],
+ 'RobotsDefault': [20],
+ 'TrashCPU': [16, 17],
+ 'UdpReceiveCores': [19],
+ 'UdpSendCores': [19]}
+DS32:
+{'AllRobotsThCPU': [18],
+ 'GatewaysDefault': [21, 22, 23, 24, 25, 26],
+ 'RemoteFormulaCPU': [18],
+ 'RobotsDefault': [20],
+ 'TrashCPU': [16, 17],
+ 'UdpReceiveCores': [19],
+ 'UdpSendCores': [19]}
+DS36:
+{'AllRobotsThCPU': [18],
+ 'GatewaysDefault': [21, 22, 23, 24, 25, 26],
+ 'RemoteFormulaCPU': [18],
+ 'RobotsDefault': [20],
+ 'TrashCPU': [16, 17],
+ 'UdpReceiveCores': [19],
+ 'UdpSendCores': [19]}
+DS38:
+{'AllRobotsThCPU': [18],
+ 'GatewaysDefault': [21, 22, 23, 24, 25, 26],
+ 'RemoteFormulaCPU': [18],
+ 'RobotsDefault': [20],
+ 'TrashCPU': [16, 17],
+ 'UdpReceiveCores': [19],
+ 'UdpSendCores': [19]}
+EXT1:
+{'AllRobotsThCPU': [13],
+ 'ClickHouseCores': [12],
+ 'Formula': [12],
+ 'GatewaysDefault': [13, 14],
+ 'RemoteFormulaCPU': [13],
+ 'RobotsDefault': [15],
+ 'TrashCPU': [12],
+ 'UdpReceiveCores': [14],
+ 'UdpSendCores': [14]}
+MDR1:
+{'AllRobotsThCPU': [2],
+ 'GatewaysDefault': [3, 4, 5],
+ 'RemoteFormulaCPU': [2],
+ 'RobotsDefault': [2],
+ 'TrashCPU': [2],
+ 'UdpReceiveCores': [6],
+ 'UdpSendCores': [6]}
+OMM1:
+{'AllRobotsThCPU': [33],
+ 'Formula': [36],
+ 'GatewaysDefault': [37, 38, 39, 40],
+ 'RemoteFormulaCPU': [34],
+ 'RobotsDefault': [41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+                   56, 57, 58],
+ 'TrashCPU': [32],
+ 'UdpReceiveCores': [35],
+ 'UdpSendCores': [35]}
+
+
+ Весь физический сервер - 64 ядра
+ у нас на сервере  5 инстансов: BEA1, DS3*, EXT1, MDR1, OMM1 (инстансы DS30-DS38 считаем одной группой, они будут распологаться на одних и тех же ядрах)
+ 
+ MDR1 - 5 ядер (3 cores Gateway, 1 core Robot - with non correct topology)
+ BEA1 - 5 ядер (3 cores Gateway, 1 core Robot - with non correct topology)
+ EXT1 - 4 ядра (2 cores Gateway, 1 core Robot - with non correct topology)
+ DS3_Group - 11 ядер (5 cores Gateway, 1 core Robot - - with non correct topology)
+ OMM1 - 27 ядер (4 cores Gateway, 18 cores Robots)
+ 
+ Посчитаем кол-во ядер для расположения инстансов
+
+ N - кол-во ядер всего инстанса (64 ядра)
+ Вычитаем системные ядра R = N - N/10 (OS - 6.4, округляем до 6) - N/12 (IRQ - 5.3, округляем до 6, так как 6 ближе чем 4)
+ R = 52 
+ Нужно учитывать что здесь 2 сетевых интерфейса net* и hit*  > 2 сетевые Numa node > Numa0(net*) , Numa1(hit*)
+ Все инстансы кроме OMM1 принадлежат Numa0(net*) следовательно им для работы необходим именно этот интерфейс, OMM1 полностью расположен на Numa1(hit*): ему необходим интерфейс hit*
+ Примечание: каждому сетевому интерфейсу необходимо получить IRQ ядра > мы уже высчитали что на весь сервер нам нужно 6 IRQ ядер. Мы равномерно распределяем их между сетевыми интерфейсами net*/hit* (Numa0 / Numa1) по 3 ядра
+ Примечание 2: для более справделивого распределения ресурсов мы разделим топологию ядер OS на 2 разные Numa node, это связанно с высоким дефицитом ядер и большим количеством инстансов, равномерно распределим ядра OS на обе Numa Node (0-2 , 61-63)
+
+ Посчитаем кол-во ядер для распределения логики и получения MD для всех инстансов (Z)
+
+ Z_Numa0 = 32 - 3 OS cores - 3 IRQ cores - 3 * 4 BenderServer Service cores = 14 ядер для распределния Gateway и Robot на все инстансы Numa0
+ Z_Numa1 = 32 - 3 OS cores - 3 IRQ cores - 3 * 1 BenderServer Service cores = 23 ядра для распределния Gateway и Robot на все инстансы Numa1 
+
+ Для аудита текущей топологии мы определили к какому количеству ядер и роботов стремится каждый инстанс, наша задача переконфигурировать топологию сервисов и их прибивки к ядрам, для повышения производительности, стремясь к ожидаемым количествам ядер, приведу ниже разбор на примере BEA1
+
+Примечание (их отличия от минимального возможного)
+
+BEA1 - небольшой сервер, сейчас использует 5 ядер (7-11), есть нарушения по распределению ядер, после реконфигурации на валидную будет использовать те же 5 ядер, но количество ядер Gateway уменьшится с 3х до 1го, нам нужно стремиться не сильно изменять кол-во ядер выделенных под сервис изначально, исправляя только их соседство, на ядрах с ядрами роботов и гейтвеев недопустимо никакое сосдество сервисов, следовательно может перенести ядро UDP на Trash, это допустимая оптимизация и мы приблизимся к необходимому кол-ву ядер (3) 
+распределение станет: 
+Trash + RF + UDP - ядро 7 
+AR - ядро 8
+Gateway - ядра 9-10
+Robot - ядро 11
+
+Оптимизировать конфигурацию больне невозможно, дальнейшая оптимизация либо увеличения кол-ва ядер
+
+Разберем Z_Numa1, 
+У нас есть 23 ядра для распределения Gateway и Robot cores, 
+Gateway = 23 * 1/4 = 5.75 - округляем до 6
+Robot = 23 - Gateway_cores = 17 ядер 
+
+Далее расределяем стремясь соблюдать правила конфигурации сервисов по L3 кэшу 
